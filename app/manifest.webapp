@@ -1,0 +1,22 @@
+{
+  "name": "ZY-KaiCam",
+  "short_name": "ZY-KaiCam",
+  "description": "用智云云鹤 M2 的按键控制 KaiOS 相机（拍照/录像/参数）",
+  "type": "privileged",
+  "launch_path": "/index.html",
+  "icons": {
+    "56": "/icons/icon56.png",
+    "112": "/icons/icon112.png"
+  },
+  "permissions": {
+    "bluetooth": {},
+    "camera": {},
+    "device-storage:pictures": { "access": "readwrite" },
+    "device-storage:videos": { "access": "readwrite" }
+  },
+  "orientation": ["portrait-primary"],
+  "developer": {
+    "name": "kaios-zhiyun",
+    "url": "https://github.com/"
+  }
+}

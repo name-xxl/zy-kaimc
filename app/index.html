@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+  <title>ZY-KaiCam</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <div id="app">
+    <div id="finder-view" class="view">
+      <video id="preview" autoplay></video>
+      <div id="hud-top">
+        <span id="hud-ble">…</span>
+        <span id="hud-rec" class="hidden">● REC</span>
+        <span id="hud-mode">…</span>
+      </div>
+      <div id="hud-bottom">
+        <span id="hud-param"></span>
+        <span id="hud-zoom"></span>
+      </div>
+      <div id="flash-overlay"></div>
+      <div id="toast" class="hidden"></div>
+    </div>
+
+    <div id="menu-view" class="view hidden">
+      <div id="menu-title"></div>
+      <ul id="menu-list"></ul>
+    </div>
+
+    <div id="softkey-bar">
+      <span id="sk-left"></span>
+      <span id="sk-center"></span>
+      <span id="sk-right"></span>
+    </div>
+  </div>
+
+  <script src="js/util.js"></script>
+  <script src="js/strings.js"></script>
+  <script src="js/zhiyun.js"></script>
+  <script src="js/ble.js"></script>
+  <script src="js/camera.js"></script>
+  <script src="js/ui.js"></script>
+  <script src="js/main.js"></script>
+</body>
+</html>

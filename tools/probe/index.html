@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+  <title>ZY-BLE Probe</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <div id="app">
+    <div id="status">初始化…</div>
+    <div id="log"></div>
+    <div id="hint">OK=连接 5=心跳 6=电量 *=自动心跳</div>
+    <div id="softkey-bar">
+      <span id="sk-left">重扫</span>
+      <span id="sk-center">OK</span>
+      <span id="sk-right">清屏</span>
+    </div>
+  </div>
+
+  <script src="js/util.js"></script>
+  <script src="js/zhiyun.js"></script>
+  <script src="js/ble.js"></script>
+  <script src="js/probe.js"></script>
+</body>
+</html>
