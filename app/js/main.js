@@ -58,7 +58,8 @@
     try { if (cam.control) cam.control.release(); } catch (e) { /* 已释放 */ }
   }
 
-  /* 满屏：收复系统状态栏区域（240x294 → 240x320）。切回前台后需重新请求 */
+  /* 满屏：manifest 已声明 "fullscreen": "true"（启动即全屏、状态栏不出现、不受息屏影响）；
+   * 这里只做兜底重请求——JS Fullscreen API 在息屏（有锁屏）或合盖后会失效（240x294 → 240x320） */
   function goFullscreen() {
     try {
       if (document.mozFullScreenEnabled && !document.mozFullScreen &&
