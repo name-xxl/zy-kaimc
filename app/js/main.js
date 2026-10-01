@@ -19,7 +19,7 @@
   var Dbg = root.KaiDbg;
   var Menu = root.KaiMenu;
 
-  var APP_VERSION = 'v8.8';
+  var APP_VERSION = 'v8.9';
   var GIMBAL_NAME_RE = /CRANE[-_ ]?M2/i;
 
   /* 云台链路状态 */
@@ -707,7 +707,8 @@
 
   function closeAbout() {
     UI.showView('menu');
-    UI.setSoftkeys(t('skBack'), t('skClose'), t('skMode'));
+    UI.setSoftkeys(t('skBack'), '', t('skMode'));
+    UI.refreshMenu();   /* 触发 onMenuSel，中键文案按当前选中项恢复（可进入的项才显示「进入」） */
   }
 
   /* ---------- 按键 ---------- */
