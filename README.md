@@ -29,8 +29,26 @@ node scripts/build.js          # 语法 + 协议自测 + 同步共享 JS + 打�
 node scripts/test-session.js   # 会话层仿真回归（假适配器，不碰真机）
 ```
 
-自动完成：全部 JS 语法检查、manifest 校验、CRC16/帧编解码自测（含 Weebill-S 实测心跳样例）、
-共享 JS 同步到探针、打包两个 zip。无任何 npm 依赖。
+自动完成：全部 JS 语法检查、manifest 校验、协议自测（含 ZY Play 抓包回归）、共享 JS 同步到探针、
+版本一致性自检（HUD 版本 ↔ manifest 版本）、打包。无任何 npm 依赖。
+
+产物：`dist/zy-kaimc-<版本>.zip`（**交付件**）＋ `dist/zy-kaimc.zip`（最新副本，供脚本/文档引用）；
+探针同理 `zy-probe-<版本>.zip` / `zy-probe.zip`。
+
+## 分发与交付
+
+交付物就是**打包应用 zip**（`manifest.webapp` + 全部文件）。两条安装路径要分清：
+
+| 路径 | 交付物 | 需要签名？ | 适用 |
+|---|---|---|---|
+| **开发者模式侧载**（WebIDE / gdeploy / adb，本项目当前方式） | 同一个 zip | **不需要** | KaiOS 2.5 机型（2720 / 8110 …）；对方需先开开发者模式，见 [docs/install-2720.md](docs/install-2720.md) |
+| **KaiStore 上架** | 同一个 zip，但必须先**签名**：`kaios-sign` 生成密钥对 → 公钥交 KaiOS 换证书 → 包内带 `META-INF` 签名 | **必须**（未签名包只能装开发机） | 面向公众分发；包大小上限 20 MB（本包约 37 KB） |
+
+- **中国区合规（CTA）**：面向中国市场的系统是 KaiOS 2.5.2.1 / 2.5.4.1。对**联网或读通话记录**的 privileged 应用，
+  manifest 必须补 `mobiledata` / `wifidata` / `calllog` 权限并弹安装确认窗，否则不上架。
+  **本应用不联网**（只有 bluetooth / camera / storage），按官方 FAQ 原文"无需做任何修改"。
+- **KaiOS 3.0 侧载已被锁死**（Firefox/Pale Moon 的 WebIDE 已移除、未签名包直接被拒，只剩"注册开发者→签名→上架→把自己手机登记为 tester"）
+  ——这也是本项目锁定 2.5 机型的原因之一。
 
 ## 按键说明（主应用）
 
