@@ -25,7 +25,6 @@
     pollTimer: null,
     reconnectTimer: null,
     lastPollVal: null,
-    pollErr: 0,
     gimbalBatt: null,
     recTimer: null,
     recSecs: 0,
@@ -214,23 +213,46 @@
     });
   }
 
+  /* 通知特征大多没有 READ 属性；对它 readValue 会被 Gecko 直接拒绝
+   * （ReadValue: BT_ENSURE_TRUE_REJECT(mProperties & GATT_CHAR_PROP_BIT_READ) failed），
+   * 旧逻辑连错 4 次（约 400ms）就判"断线"→ 连接后必然立刻重连的死循环。
+   * GATT_CHAR_PROP_BIT_READ = 0x02 */
+  function canReadChar(ch) {
+    try {
+      if (typeof ch.properties === 'number') return (ch.properties & 0x02) !== 0;
+    } catch (e) { /* 无 properties 属性 */ }
+    return true; /* 拿不到属性时维持旧行为 */
+  }
+
+  /* 链路是否已断：connected / connectionState 两个口径都试（不同固件暴露不同） */
+  function linkDown(gatt) {
+    try { if (gatt.connected === false) return true; } catch (e) { /* 无该属性 */ }
+    try {
+      var s = gatt.connectionState;
+      if (s === 'disconnected' || s === 0) return true;
+    } catch (e) { /* 无该属性 */ }
+    return false;
+  }
+
   function startPolling() {
     stopPolling();
     state.lastPollVal = null;
-    state.pollErr = 0;
+    var canRead = canReadChar(state.conn.notifyChar);
+    if (!canRead) dlog('通知特征不可读：跳过 POLL，接收靠 notify');
     state.pollTimer = root.setInterval(function () {
       var con = state.conn;
       if (!con || !con.notifyChar) return;
-      if (con.gatt.connected === false) { onDisconnected(); return; }
+      if (linkDown(con.gatt)) { onDisconnected('链路断开'); return; }
+      if (!canRead) return;
       U.prom(con.notifyChar.readValue(), 'readValue').then(function () {
         var v = new Uint8Array(con.notifyChar.value || []);
-        state.pollErr = 0;
         if (v.length && (!state.lastPollVal || !bytesEqual(state.lastPollVal, v))) {
           state.lastPollVal = new Uint8Array(v);
           state.client.feed(v);
         }
       }).catch(function () {
-        if (++state.pollErr >= 4) onDisconnected();
+        /* 读失败不再直接断线（多为永久性的属性/权限错误），交由链路状态判定 */
+        if (linkDown(con.gatt)) onDisconnected('链路断开');
       });
     }, 100);
   }
@@ -239,8 +261,8 @@
     if (state.pollTimer) { root.clearInterval(state.pollTimer); state.pollTimer = null; }
   }
 
-  function onDisconnected() {
-    dlog('云台断线，3s 后重连');
+  function onDisconnected(reason) {
+    dlog('云台断线' + (reason ? '(' + reason + ')' : '') + '，3s 后重连');
     stopPolling();
     if (state.client) state.client.stopHeartbeat();
     bt.disconnect(state.conn);

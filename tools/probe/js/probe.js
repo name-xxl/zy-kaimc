@@ -131,12 +131,16 @@
     });
   }
 
-  /* 连接后把每个特征读一遍，作为基线 */
+  /* 连接后把每个特征读一遍，作为基线；无 READ 位的直接标注（读会被 Gecko 拒绝） */
   function dumpAllChars() {
     var con = S.conn;
     if (!con) return;
     con.services.forEach(function (s) {
       (s.characteristics || []).forEach(function (c) {
+        if (!canRead(c)) {
+          log('[INIT] ' + shortUuid(c.uuid) + ' = (不可读，无 READ 位)');
+          return;
+        }
         U.prom(c.readValue()).then(function () {
           var v = new Uint8Array(c.value || []);
           log('[INIT] ' + shortUuid(c.uuid) + ' = ' + (v.length ? U.hex(v) : '(空)'));
@@ -146,15 +150,28 @@
     });
   }
 
-  /* 轮询兜底：100ms 读 fee9 特征，变化才上报 */
+  /* GATT_CHAR_PROP_BIT_READ = 0x02 */
+  function canRead(c) {
+    try {
+      if (typeof c.properties === 'number') return (c.properties & 0x02) !== 0;
+    } catch (e) { /* 无 properties 属性 */ }
+    return true;
+  }
+
+  /* 轮询兜底：100ms 读 fee9 里可读的特征，变化才上报。
+   * 云台把通知特征声明为不可读，对它读会被 Gecko 直接拒绝、徒增日志且永远无数据 */
   function startPoll() {
     if (S.pollTimer) root.clearInterval(S.pollTimer);
+    var chars = (S.conn && S.conn.fee9 && S.conn.fee9.characteristics) || [];
+    var readable = chars.filter(canRead);
+    if (chars.length && !readable.length) {
+      log('fee9 特征都不可读：POLL 永远无数据，接收只能看 [IN/NOTIFY] 行');
+    }
     S.pollTimer = root.setInterval(function () {
       var con = S.conn;
       if (!con) return;
       if (con.gatt.connected === false) { log('✗ GATT 断开'); cleanup(); return; }
-      if (!con.fee9) return;
-      (con.fee9.characteristics || []).forEach(function (c) {
+      readable.forEach(function (c) {
         U.prom(c.readValue()).then(function () {
           var v = new Uint8Array(c.value || []);
           if (!v.length) return;

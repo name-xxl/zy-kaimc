@@ -57,7 +57,7 @@ node scripts/build.js
 已知风险（均有对策，详见 docs/）：
 
 1. **M2 协议与 Weebill-S 有差异（约 20% 概率）** → 探针实测为准，字节写在 `BUTTON_MAP`，只改映射不改架构。
-2. **KaiOS 实机 GATT 通知可能不触发**（kaios.dev 实测结论；2026-10-01 本机 GATT 连接/服务发现已通过，通知是否派发待探针确认）→ 主应用与探针都内置 100ms `readValue` 轮询差分兜底。
+2. **KaiOS 实机 GATT 通知可能不触发**（kaios.dev 实测结论；2026-10-01 本机 GATT 连接/服务发现已通过，通知是否派发待探针按键实测）。注意：M2 的通知特征（…129601）声明为**不可读**（无 READ 位），`readValue` 会被栈直接拒绝（`ReadValue: GATT_CHAR_PROP_BIT_READ failed`），**轮询不可能拿到数据**——接收完全依赖 notify。早期"100ms 轮询兜底"对 M2 无效，且会因连错 4 次误判断线造成约 400ms 的重连死循环，已修（不可读则跳过 POLL，读错误不再直接断线）。
 3. **2720 的 2MP 相机 HAL 参数不全** → 参数菜单按 `capabilities` 动态生成，缺的自动隐藏，不影响快门功能。
 4. **固件无中文字形** → 把 `app/js/strings.js` 的 `LANG` 改为 `'en'`。
 

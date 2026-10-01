@@ -59,6 +59,7 @@
 | 蓝牙开启超时 | 先确认**系统设置里蓝牙已打开**；App 会显示 `BT: enabled=? state=?` 原始状态，把该行内容发给开发者；检测不到状态时 App 会直接尝试扫描 |
 | 扫不到云台 | 云台重启；确认系统蓝牙开着；确认设备名 `CRANE-M2-XXXX`（名字在机身贴纸/探针日志可见） |
 | gatt.connect 失败 | 云台被别的 App 占用（ZY Cami 或旧会话），关云台重开 |
+| 刚连上就「云台断线」反复重连（约 4s 一轮） | 旧版应用对**不可读**的通知特征做 100ms `readValue` 轮询，被栈拒绝（logcat `ReadValue: BT_ENSURE_TRUE_REJECT(mProperties & GATT_CHAR_PROP_BIT_READ) failed`）4 次即误判断线。已修（不可读则跳过 POLL、读错误不再直接断线）。若仍出现：按 `#` 看断线括号里的原因（链路断开/轮询失败）并发给开发者 |
 | 「设备没有 GATT 接口(has=…)」 | **已定论（2026-10-01 实机）**：本机 GATT 完全可用——FEE9 过滤扫描扫到的设备 `type=le`、`gatt` 非空，`connect()`/`discoverServices()` 成功，fee9 + 129600/129601 特征齐全。此前报错是应用侧 bug（把扫描包装对象 `{address,name,rssi,device}` 当成 BluetoothDevice 用，`has=address\|name` 就是这么来的），已修。现在若再见此错：确认扫描走 FEE9 过滤、云台未被 ZY Cami 占用、云台重启后重试；`paired=` 只是兜底结局（0/noGATT/noMatch），**不需要配对**——`adapter.pair()` 在本固件会挂起等 PIN，不要调用 |
 | 中文显示方框 | 固件无中文字形：把 `app/js/strings.js` 的 `LANG` 改为 `'en'` 重装 |
 | 想看运行日志 | WebIDE console 可看到探针/主应用输出；主应用取景界面按 `#` 有屏幕调试面板（再按关闭） |
