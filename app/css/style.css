@@ -62,6 +62,20 @@ html, body {
   word-break: break-all;
 }
 
+/* 构图辅助线（九宫格）：四条 1px 白线，压在取景画面上 */
+#grid-overlay {
+  position: absolute; top: 0; left: 0; right: 0; bottom: 0;
+  pointer-events: none;
+}
+#grid-overlay .gv {
+  position: absolute; top: 0; bottom: 0; width: 1px;
+  background: rgba(255, 255, 255, 0.5);
+}
+#grid-overlay .gh {
+  position: absolute; left: 0; right: 0; height: 1px;
+  background: rgba(255, 255, 255, 0.5);
+}
+
 #flash-overlay {
   position: absolute; top: 0; left: 0; right: 0; bottom: 0;
   background: #fff; opacity: 0;

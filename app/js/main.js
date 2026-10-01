@@ -15,7 +15,7 @@
   /* 本文件只做编排：相机 + UI/键位 + 云台会话(KaiSession) + 按键分发(KaiButtons)。
    * 键码与时序常量见 config.js（AppCfg.KEY / AppCfg.*_MS） */
 
-  var APP_VERSION = 'v8.1';
+  var APP_VERSION = 'v8.2';
   var GIMBAL_NAME_RE = /CRANE[-_ ]?M2/i;
 
   var state = {
@@ -45,6 +45,7 @@
     ecNow: 0,
     debugOn: false,
     debugScroll: 0,
+    grid: false,
     appLog: []
   };
 
@@ -124,6 +125,8 @@
     UI.toast('ZY-KaiCam ' + APP_VERSION, 2500);
     setHudBle(t('camInit'));
     UI.hud({ mode: t('modePhoto') });
+    state.grid = loadGrid();
+    applyGrid();
     root.addEventListener('keydown', onKey);
     root.document.addEventListener('visibilitychange', onVis);
     probeAppIdentity();
@@ -569,16 +572,19 @@
   function renderHudParams() {
     var caps = cam.capabilities();
     var NB = '\u00A0';   /* 标签与取值之间用不换行空格：折行只发生在 · 分隔处 */
+    /* 只显示"改过"的值：自动/0 这类默认值不占 HUD（要看全部值去参数菜单），
+     * 这样底部通常只有一行，宁缺毋滥 */
+    var DEF = /^(auto|自动)$/i;
     var parts = [];
     if (caps.whiteBalanceModes.length) {
       var wb = cam.getParam('whiteBalance');
-      if (wb !== undefined && wb !== null) parts.push(t('hudWb') + NB + tval(wb));
+      if (wb !== undefined && wb !== null && !DEF.test(String(wb))) parts.push(t('hudWb') + NB + tval(wb));
     }
     if (caps.isoModes.length) {
       var iso = cam.getParam('iso');
-      if (iso !== undefined && iso !== null) parts.push(t('hudIso') + NB + tval(iso));
+      if (iso !== undefined && iso !== null && !DEF.test(String(iso))) parts.push(t('hudIso') + NB + tval(iso));
     }
-    if (state.ecList.length) {
+    if (state.ecList.length && Number(state.ecNow) !== 0) {
       parts.push(t('hudEc') + NB + fmtEc(state.ecNow));
     }
     UI.hud({
@@ -637,6 +643,27 @@
     var s = String(n).replace(/(\.\d*?)0+$/, '$1').replace(/\.$/, '');
     return (n > 0 ? '+' : '') + s;
   }
+
+  /* ---------- 构图辅助线（九宫格，* 键或参数菜单切换，设置持久化） ---------- */
+
+  var GRID_KEY = 'zyGrid';
+
+  function loadGrid() {
+    try { return root.localStorage && root.localStorage.getItem(GRID_KEY) === '1'; } catch (e) { return false; }
+  }
+
+  function applyGrid() {
+    U.show('grid-overlay', !!state.grid);
+  }
+
+  function toggleGrid(silent) {
+    state.grid = !state.grid;
+    try { root.localStorage.setItem(GRID_KEY, state.grid ? '1' : '0'); } catch (e) { /* 无存储 */ }
+    applyGrid();
+    if (!silent) UI.toast(t('grid') + ' ' + (state.grid ? t('gridOn') : t('gridOff')), 1200);
+  }
+
+  function gridText() { return state.grid ? t('gridOn') : t('gridOff'); }
 
   /* ---------- 参数菜单 ---------- */
 
@@ -713,7 +740,16 @@
       items.push(ecItem);
     }
     if (!items.length) items.push({ label: t('noParams'), valueText: '' });
-    /* 末项：关于（Enter 进入二级页，展示版本号与项目地址） */
+    /* 构图辅助线（←→ 切换）与关于（中键/→ 进入二级页） */
+    items.push({
+      label: t('grid'),
+      valueText: gridText(),
+      cycle: function () {
+        toggleGrid(true);
+        this.valueText = gridText();
+        UI.refreshMenu();
+      }
+    });
     items.push({
       label: t('about'),
       valueText: APP_VERSION,
@@ -806,6 +842,7 @@
       case 'ArrowRight': case '6': ecStep(1); e.preventDefault(); break;
       case '1': cycleQuickParam('whiteBalance'); break;
       case '3': cycleQuickParam('iso'); break;
+      case '*': toggleGrid(); break;
       case '0': if (AppCfg.DEBUG) askBattery(); break;
       case '5': if (AppCfg.DEBUG) sayHello(); break;
       case '7': if (AppCfg.DEBUG) motionTest(); break;
