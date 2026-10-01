@@ -50,13 +50,14 @@ node scripts/build.js
 
 - [x] 协议层：CRC16-XMODEM 与帧编解码通过 Weebill-S 实测样例自测（本地可验证）
 - [ ] 真机：2720 开发者模式连通、privileged 应用安装
-- [ ] 真机：探针确认 M2 的 GATT 特征与按键字节（**go/no-go 门槛**）
+- [x] 真机：GATT 链路实测连通（2026-10-01：FEE9 过滤扫描 → `type=le`/`gatt` 非空 → `connect()`/`discoverServices()` 成功 → fee9 + 129600 写/129601 通知特征齐全；不需要配对）
+- [ ] 真机：探针捕获 M2 按键字节（**剩余 go/no-go 门槛**）
 - [ ] 真机：相机取景/拍照/录像与参数
 
 已知风险（均有对策，详见 docs/）：
 
 1. **M2 协议与 Weebill-S 有差异（约 20% 概率）** → 探针实测为准，字节写在 `BUTTON_MAP`，只改映射不改架构。
-2. **KaiOS 实机 GATT 通知可能不触发**（kaios.dev 实测结论）→ 主应用与探针都内置 100ms `readValue` 轮询差分兜底。
+2. **KaiOS 实机 GATT 通知可能不触发**（kaios.dev 实测结论；2026-10-01 本机 GATT 连接/服务发现已通过，通知是否派发待探针确认）→ 主应用与探针都内置 100ms `readValue` 轮询差分兜底。
 3. **2720 的 2MP 相机 HAL 参数不全** → 参数菜单按 `capabilities` 动态生成，缺的自动隐藏，不影响快门功能。
 4. **固件无中文字形** → 把 `app/js/strings.js` 的 `LANG` 改为 `'en'`。
 

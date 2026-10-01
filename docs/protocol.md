@@ -1,6 +1,6 @@
 # 智云云鹤 M2 BLE 协议笔记
 
-## 已知部分（来自 Weebill-S / Crane 2S 逆向，M2 大概率同源，**待探针确认**）
+## 已知部分（来自 Weebill-S / Crane 2S 逆向，M2 大概率同源；GATT 结构已实机确认 2026-10-01，帧/按键**待探针确认**）
 
 来源：
 - https://petermaguire.xyz/posts/zhiyun-weebil-s-ble-protocol/ （Weebill-S 完整逆向）
@@ -45,7 +45,7 @@ CRC  CRC16/XMODEM（init 0x0000，poly 0x1021），对 FMT..PAYLOAD 计算，小
 
 探针操作：连接后依次按云台按键，记录 `[IN]` / `[POLL]` 行字节；按 `5` 发心跳、`6` 请求电量、`*` 开关自动心跳。
 
-- [ ] service 是否为 fee9，特征对 UUID 是否一致：
+- [x] service 是否为 fee9，特征对 UUID 是否一致：**是**（2026-10-01 实机 bt-diag：发现服务 1801/1800/fee9；fee9 下 `d44bc439-…-129600`（写）与 `…-129601`（通知），与 Weebill-S 一致）
 - [ ] notify 事件是否触发（有无 `[IN] NOTIFY` 行；没有则只能靠 `[POLL]` 轮询）：
 - [ ] 是否需要先发心跳/握手，云台才上报按键：
 - [ ] 快门键 短按：`24 3E …`（完整字节）

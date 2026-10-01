@@ -59,7 +59,7 @@
 | 蓝牙开启超时 | 先确认**系统设置里蓝牙已打开**；App 会显示 `BT: enabled=? state=?` 原始状态，把该行内容发给开发者；检测不到状态时 App 会直接尝试扫描 |
 | 扫不到云台 | 云台重启；确认系统蓝牙开着；确认设备名 `CRANE-M2-XXXX`（名字在机身贴纸/探针日志可见） |
 | gatt.connect 失败 | 云台被别的 App 占用（ZY Cami 或旧会话），关云台重开 |
-| 「设备没有 GATT 接口(has=…)」 | 看括号里的诊断串：`has=` 里没有 `gatt` 说明这版固件没把 GATT 暴露给应用；`paired=` 显示配对兜底结局（0=没配对/noGATT/noMatch）。云台是 **BLE-only**，系统蓝牙设置走经典扫描**搜不到它，属正常**——配对要用探针：扫到 ★ 设备选中后**按 8 程序配对**，再按 7 查配对记录有无 gatt，把屏上日志发给开发者 |
+| 「设备没有 GATT 接口(has=…)」 | **已定论（2026-10-01 实机）**：本机 GATT 完全可用——FEE9 过滤扫描扫到的设备 `type=le`、`gatt` 非空，`connect()`/`discoverServices()` 成功，fee9 + 129600/129601 特征齐全。此前报错是应用侧 bug（把扫描包装对象 `{address,name,rssi,device}` 当成 BluetoothDevice 用，`has=address\|name` 就是这么来的），已修。现在若再见此错：确认扫描走 FEE9 过滤、云台未被 ZY Cami 占用、云台重启后重试；`paired=` 只是兜底结局（0/noGATT/noMatch），**不需要配对**——`adapter.pair()` 在本固件会挂起等 PIN，不要调用 |
 | 中文显示方框 | 固件无中文字形：把 `app/js/strings.js` 的 `LANG` 改为 `'en'` 重装 |
 | 想看运行日志 | WebIDE console 可看到探针/主应用输出；主应用取景界面按 `#` 有屏幕调试面板（再按关闭） |
 
