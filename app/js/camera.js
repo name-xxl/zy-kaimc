@@ -421,14 +421,13 @@
       try { profiles = Object.keys((this.caps && this.caps.recorderProfiles) || {}); } catch (e) { /* 无列表 */ }
       if (!profiles.length) profiles = ['low', 'default', 'high'];
       var profile = (profiles.indexOf('high') !== -1) ? 'high' : profiles[profiles.length - 1];
-      var ang = 270;
-      try { ang = Number(c.sensorAngle) || 270; } catch (e2) { /* 默认 */ }
       return new Promise(function (resolve, reject) {
         try { c.setConfiguration({ mode: 'video', recorderProfile: profile }); } catch (e3) { /* 继续尝试 */ }
         root.setTimeout(function () {
           var filename = videoFilename(profile);
           try {
-            var p = c.startRecording({ rotation: ang, maxFileSizeBytes: 536870912, createPoster: false },
+            /* rotation = 设备显示朝向（竖屏应用恒为 0），不是传感器角度 */
+            var p = c.startRecording({ rotation: 0, maxFileSizeBytes: 536870912, createPoster: false },
               storage, filename);
             self.recording = true;
             self.dbg('✓ 录像开始 ' + filename + ' (' + profile + ')');
