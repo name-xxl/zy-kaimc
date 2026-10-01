@@ -9,9 +9,12 @@
   var cam = root.KaiCam;
   var Z = root.Zhiyun;
 
-  /* 云台按键 → 动作。探针（tools/probe）确认 M2 实际字节后在此扩充 */
+  /* 云台按键上报 → 动作（2026-10-01 真机实测键码）：
+   *   0x3D = 拍照/录像键（正面左下）→ 快门（录像起停 / 拍照）
+   *   0x17/0x27、0x18/0x28 = 变焦杆 T/W 两方向的按下+释放 → 不映射（按一下会双触发）
+   *   M 键（模式）实测不上报 BLE 事件（只在云台本地切 PF/POV）→ 无事件可映射 */
   var BUTTON_MAP = {
-    0x20: 'shutter'
+    0x3D: 'shutter'
   };
 
   var APP_VERSION = 'v6';
@@ -391,8 +394,10 @@
   }
 
   function onGimbalButton(f) {
-    dlog('云台按键 cmd=0x20 payload=' + U.hex(f.payload));
-    var action = BUTTON_MAP[f.cmd] || 'shutter';
+    /* 键码在 payload 第二字节（格式 C0 <码> 00）；未登记的键码只记日志不动作 */
+    var code = (f.payload && f.payload.length >= 2 && f.payload[0] === 0xC0) ? f.payload[1] : null;
+    dlog('云台按键 code=' + (code === null ? '??' : '0x' + code.toString(16)) + ' payload=' + U.hex(f.payload));
+    var action = code === null ? null : BUTTON_MAP[code];
     if (action === 'shutter') shutter();
     else if (action === 'mode') switchMode();
   }
