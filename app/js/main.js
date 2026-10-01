@@ -195,10 +195,21 @@
         .catch(function (e) { dlog('notify 检查异常(' + ((e && e.message) || e) + ')'); })
         .then(function () {
           startPolling();
+          /* 首拍心跳单独发，记录写通道结果（周期性心跳的错误被静默） */
+          state.client.heartbeat().then(function () {
+            dlog('[OUT] 心跳 ok');
+          }, function (e) {
+            dlog('[OUT] 心跳失败: ' + ((e && (e.message || e.name)) || e));
+          });
           state.client.startHeartbeat(1000);
           dlog('✓ 云台就绪(心跳1s)');
           UI.hud({ ble: t('connected') });
           UI.toast(t('connected'));
+          /* 主动探测：2s 后发一次电量查询(0x06)，云台若有应答会出现在 [IN#] 行 */
+          root.setTimeout(function () { askBattery(); }, 2000);
+          root.setTimeout(function () {
+            if (state.rxCount === 0) dlog('6s 无云台数据（对照 docs/protocol.md 待验证项）');
+          }, 6000);
         });
     }).catch(function (err) {
       dlog('✗ 云台连接失败: ' + (err && err.message));
@@ -298,6 +309,15 @@
     if (a.length !== b.length) return false;
     for (var i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
     return true;
+  }
+
+  function askBattery() {
+    if (!state.client) return;
+    state.client.send(0x06, []).then(function () {
+      dlog('[OUT] 电量查询(0x06)已发');
+    }).catch(function (e) {
+      dlog('[OUT] 电量查询失败: ' + ((e && (e.message || e.name)) || e));
+    });
   }
 
   /* ---------- 云台事件 ---------- */
@@ -600,6 +620,7 @@
       case 'ArrowRight': case '6': ecStep(1); e.preventDefault(); break;
       case '1': cycleQuickParam('whiteBalance'); break;
       case '3': cycleQuickParam('iso'); break;
+      case '0': askBattery(); break;
       case '9': retryCamera(); break;
     }
   }
