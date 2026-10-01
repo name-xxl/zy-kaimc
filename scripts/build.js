@@ -93,8 +93,8 @@ try {
   check(false, '协议自测异常: ' + e.message);
 }
 
-/* 4) 共享 JS 同步到探针 */
-['util.js', 'ble.js', 'zhiyun.js'].forEach((f) => {
+/* 4) 共享 JS 同步到探针（逐字节一致由这里保证） */
+['config.js', 'util.js', 'ble.js', 'session.js', 'buttons.js', 'zhiyun.js'].forEach((f) => {
   fs.copyFileSync(path.join(rootDir, 'app/js', f), path.join(rootDir, 'tools/probe/js', f));
 });
 console.log('✓ 共享 JS 已同步到 tools/probe/js');

@@ -5,16 +5,14 @@
 
   var U = root.KaiUtil;
   var bt = root.KaiBt;
-  var Z = root.Zhiyun;
 
   var S = {
     devices: {},
     order: [],
     sel: 0,
     stopScan: null,
+    session: null,
     conn: null,
-    client: null,
-    pollTimer: null,
     hbOn: false,
     lastVals: {},
     connected: false
@@ -35,12 +33,6 @@
     u = String(u || '').toLowerCase();
     var m = u.match(/^0000([0-9a-f]{4})-0000-1000-8000-00805f9b34fb$/);
     return m ? m[1] : u;
-  }
-
-  function eq(a, b) {
-    if (a.length !== b.length) return false;
-    for (var i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
-    return true;
   }
 
   /* ---------- 扫描 ---------- */
@@ -74,7 +66,10 @@
     setStatus('选择 [' + (S.sel + 1) + '] ' + (S.devices[addr].name || addr));
   }
 
-  /* ---------- 连接 + 枚举 + 监听 ---------- */
+  /* ---------- 连接（订阅/官方初始化/轮询接收 全交给 KaiSession） ---------- */
+
+  var Session = root.KaiSession;
+  var Buttons = root.KaiButtons;
 
   function connectSelected() {
     var addr = S.order[S.sel];
@@ -82,10 +77,25 @@
     if (!d) { log('✗ 先 ↑/↓ 选择设备，再按 OK 连接'); return; }
     if (S.stopScan) { S.stopScan(); S.stopScan = null; }
     log('连接 ' + (d.name || d.address) + ' …');
-    bt.connect(d).then(function (con) {
+    S.session = new Session({
+      onLog: function (m) { log(m); },
+      onFrame: function (f) {
+        log('[IN] ' + U.hex(f.raw) + (f.crcOk ? '' : '  ✗CRC') +
+          '  cmd=0x' + f.cmd.toString(16) + ' flag=' + f.type);
+      },
+      onButton: function (f) {
+        var code = Buttons.codeOf(f);
+        log('>>> 按键 code=' + (code === null ? '??' : '0x' + code.toString(16)) +
+          '  payload=' + U.hex(f.payload));
+      },
+      onState: function (st, reason) {
+        if (st === 'disconnected') { log('✗ GATT 断开' + (reason ? '(' + reason + ')' : '')); cleanup(); }
+      }
+    });
+    S.session.open(d).then(function (con) {
       S.conn = con;
       S.connected = true;
-      log('✓ GATT 已连接，服务 ' + con.services.length + ' 个：');
+      log('✓ 会话就绪，服务 ' + con.services.length + ' 个：');
       con.services.forEach(function (s) {
         log('SVC ' + s.uuid);
         (s.characteristics || []).forEach(function (c) {
@@ -96,42 +106,14 @@
         });
       });
       if (con.fee9 && con.writeChar && con.notifyChar) {
-        log('✓ 匹配到智云 fee9 特征对，协议与 Weebill-S 同源');
+        log('✓ 匹配到智云 fee9 特征对（协议与 Weebill-S 同源）');
       } else {
-        log('⚠ 未匹配到 fee9 写/通知特征对（M2 协议可能不同，把上面服务清单记下来）');
+        log('⚠ 未匹配到 fee9 写/通知特征对（把上面服务清单记下来）');
       }
-      S.client = new Z.Client(function (buf) { return bt.write(con, buf); }, {
-        onFrame: function (f) {
-          log('[IN] ' + U.hex(f.raw) + (f.crcOk ? '' : '  ✗CRC') +
-            '  cmd=0x' + f.cmd.toString(16) + ' type=' + f.type);
-        },
-        onButton: function (f) {
-          log('>>> 按键事件 cmd=0x20  payload=' + U.hex(f.payload));
-        }
-      });
-      log('现在按云台上的按键（快门/模式，短按+长按各来几次），观察 [IN] 行');
-      return bt.armNotifications(con, function (v) {
-        S.client.feed(v);
-        log('[IN/NOTIFY] ' + U.hex(new Uint8Array(v)));
-      }).then(function (ni) {
-        ni = ni || {};
-        log('notify: props=' + (typeof ni.props === 'number' ? '0x' + ni.props.toString(16) : '?') +
-          ' descs=' + ni.descs + ' cccd=' + ni.cccd +
-          (ni.wrote ? ' 写=' + ni.wrote : '') +
-          (ni.note ? ' (' + ni.note + ')' : '') +
-          (ni.startErr ? ' startErr=' + ni.startErr : ''));
-        log((ni.cccd === '01' || ni.cccd === '02')
-          ? '通知已使能：按键时应出现 [IN/NOTIFY] 行（没有 → 实机不派发事件）'
-          : '⚠ CCCD 未开启：云台不会发通知，按键不会有 [IN] 行');
-      }).catch(function (e) {
-        log('notify 检查异常(' + ((e && e.message) || e) + ')');
-      });
-    }).then(function () {
       dumpAllChars();
-      startPoll();
-      log('轮询已启动(100ms)。按 5=发心跳 6=读电量 *=自动心跳 开/关');
-      var addr2 = S.order[S.sel];
-      setStatus('已连接 ' + (S.devices[addr2] ? (S.devices[addr2].name || addr2) : ''));
+      log('现在按云台按键（快门单击/双击、变焦杆 T/W），观察 [IN] 与 >>> 行');
+      log('5=发心跳 6=读电量 *=自动心跳 开/关 7=深挖固件API 8=程序配对');
+      setStatus('已连接 ' + (d.name || d.address));
     }).catch(function (e) {
       log('✗ 连接失败: ' + (e && e.message));
       log('（按 7 深挖固件 API，确认有没有 GATT 入口）');
@@ -169,49 +151,24 @@
     return true;
   }
 
-  /* 轮询兜底：100ms 读 .value（本地缓存，KaiOS 实测：通知不派发事件但会同步 .value），变化才上报 */
-  function startPoll() {
-    if (S.pollTimer) root.clearInterval(S.pollTimer);
-    var fee9 = S.conn && S.conn.fee9;
-    var chars = (fee9 && fee9.characteristics) || [];
-    S.pollTimer = root.setInterval(function () {
-      var con = S.conn;
-      if (!con) return;
-      if (con.gatt.connected === false) { log('✗ GATT 断开'); cleanup(); return; }
-      chars.forEach(function (c) {
-        var v;
-        try { v = new Uint8Array(c.value || []); } catch (e) { return; }
-        if (!v.length) return;
-        var prev = S.lastVals[c.uuid];
-        if (prev && !eq(prev, v)) {
-          log('[POLL] ' + shortUuid(c.uuid) + ': ' + U.hex(v));
-          if (S.client) S.client.feed(v);
-        }
-        if (!prev || !eq(prev, v)) S.lastVals[c.uuid] = v;
-      });
-    }, 100);
-  }
-
   function toggleHeartbeat() {
-    if (!S.client) return;
+    if (!S.session) return;
     if (S.hbOn) {
-      S.client.stopHeartbeat();
+      S.session.client.stopHeartbeat();
       S.hbOn = false;
       log('自动心跳已关');
     } else {
-      S.client.startHeartbeat(1000);
+      S.session.client.startHeartbeat(1000);
       S.hbOn = true;
       log('自动心跳已开（1s，按 0x80/0x1815）');
     }
   }
 
   function cleanup() {
-    if (S.pollTimer) { root.clearInterval(S.pollTimer); S.pollTimer = null; }
-    if (S.client) S.client.stopHeartbeat();
+    S.hbOn = false;
     if (S.stopScan) { S.stopScan(); S.stopScan = null; }
-    bt.disconnect(S.conn);
+    if (S.session) { S.session.close(); S.session = null; }
     S.conn = null;
-    S.client = null;
     S.connected = false;
     setStatus('已断开（软左=重扫）');
   }
@@ -292,13 +249,13 @@
     }
     if (k === 'SoftLeft') { startScan(); return; }
     if (k === 'SoftRight') { U.byId('log').textContent = ''; return; }
-    if (k === '5' && S.client) {
-      S.client.heartbeat().then(function () { log('[OUT] 心跳帧已发'); })
+    if (k === '5' && S.session) {
+      S.session.client.heartbeat().then(function () { log('[OUT] 心跳帧已发'); })
         .catch(function (e2) { log('✗ 发送失败: ' + e2.message); });
       return;
     }
-    if (k === '6' && S.client) {
-      S.client.send(0x06, [0x00, 0x00, 0x00]).then(function () { log('[OUT] 电量请求(0x06)已发'); })
+    if (k === '6' && S.session) {
+      S.session.send(0x06, [0x00, 0x00, 0x00]).then(function () { log('[OUT] 电量请求(0x06)已发'); })
         .catch(function (e2) { log('✗ 发送失败: ' + e2.message); });
       return;
     }
