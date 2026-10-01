@@ -15,7 +15,7 @@
   /* 本文件只做编排：相机 + UI/键位 + 云台会话(KaiSession) + 按键分发(KaiButtons)。
    * 键码与时序常量见 config.js（AppCfg.KEY / AppCfg.*_MS） */
 
-  var APP_VERSION = 'v7.3';
+  var APP_VERSION = 'v7.4';
   var GIMBAL_NAME_RE = /CRANE[-_ ]?M2/i;
 
   var state = {
@@ -27,6 +27,8 @@
     gimbalBatt: null,
     gimbalBattRaw: null,
     gimbalState: null,
+    gimbalConnected: false,
+    bleText: '',
     battTimer: null,
     modeTimer: null,
     rxCount: 0,
@@ -102,7 +104,8 @@
     U.lockPortrait();
     setFinderKeys();
     UI.toast('ZY-KaiCam ' + APP_VERSION, 2500);
-    UI.hud({ ble: t('camInit'), mode: t('modePhoto') });
+    setHudBle(t('camInit'));
+    UI.hud({ mode: t('modePhoto') });
     root.addEventListener('keydown', onKey);
     root.document.addEventListener('visibilitychange', onVis);
     probeAppIdentity();
@@ -113,12 +116,12 @@
       dlog('✓ 相机就绪');
       setupZoomAndEc();
       renderHudParams();
-      UI.hud({ ble: t('scan') });
+      setHudBle(t('scan'));
       connectGimbal();
     }).catch(function (err) {
       dlog('✗ 相机初始化失败: ' + (err && err.message));
       UI.toast(cam.control ? t('previewFail') : t('camAllFail'), 5000);
-      UI.hud({ ble: t('scan') });
+      setHudBle(t('scan'));
       connectGimbal(); /* 相机失败不影响连云台 */
     });
   }
@@ -178,11 +181,11 @@
       });
     }).then(function () {
       dlog('扫描 ' + GIMBAL_NAME_RE);
-      UI.hud({ ble: t('scan') });
+      setHudBle(t('scan'));
       return waitForGimbal();
     }).then(function (dev) {
       dlog('发现云台 ' + dev.name + ' @' + dev.address);
-      UI.hud({ ble: t('connecting') });
+      setHudBle(t('connecting'));
       session = new Session({
         onFrame: onGimbalFrame,
         onButton: onGimbalButton,
@@ -192,14 +195,16 @@
       return session.open(dev);
     }).then(function () {
       dlog('✓ 云台就绪');
-      UI.hud({ ble: t('connected') });
+      state.gimbalConnected = true;
+      setHudBle(t('connected'));
       UI.toast(t('connected'));
       state.reconnectStep = 0;          /* 连上即重置重连退避 */
       stopCountdown();
       startQueries();
     }).catch(function (err) {
       dlog('✗ 云台连接失败: ' + (err && err.message));
-      UI.hud({ ble: 'BT ✗' });
+      state.gimbalConnected = false;
+      setHudBle('BT ✗');
       UI.toast(err.message || t('btFail'), 3500);
       scheduleReconnect();
     });
@@ -230,11 +235,11 @@
     state.reconnectTimer = root.setTimeout(connectGimbal, ms);
     if (state.cdTimer) root.clearInterval(state.cdTimer);
     var left = Math.round(ms / 1000);
-    UI.hud({ ble: t('disconnected') + '(' + left + 's)' });
+    setHudBle(t('disconnected') + ' ' + left + 's');
     state.cdTimer = root.setInterval(function () {
       left--;
       if (left <= 0) { root.clearInterval(state.cdTimer); state.cdTimer = null; return; }
-      UI.hud({ ble: t('disconnected') + '(' + left + 's)' });
+      setHudBle(t('disconnected') + ' ' + left + 's');
     }, 1000);
   }
 
@@ -275,6 +280,7 @@
     state.gimbalBatt = null;
     state.gimbalBattRaw = null;
     state.gimbalState = null;
+    state.gimbalConnected = false;
     renderHudParams();
     scheduleReconnect();
   }
@@ -336,7 +342,7 @@
         dlog('电量 raw=' + raw + ' ≈ ' + pct + '%');
         if (pct >= 0 && pct <= 100) {
           state.gimbalBatt = pct;
-          renderHudParams();
+          renderHudBle();
         }
       }
     }
@@ -353,7 +359,7 @@
     /* 心跳帧（0x1815）：payload 首字节常为电量百分比（旧口径，保留） */
     if (f.cmd === 0x80 && f.payload.length >= 1 && f.payload[0] <= 100 && state.gimbalBattRaw === null) {
       state.gimbalBatt = f.payload[0];
-      renderHudParams();
+      renderHudBle();
     }
   }
 
@@ -525,11 +531,22 @@
     if (state.ecList.length) {
       parts.push(t('hudEc') + NB + fmtEc(state.ecNow));
     }
-    if (state.gimbalBatt !== null) parts.push(t('gimbalBatt') + NB + state.gimbalBatt + '%');
     UI.hud({
       param: parts.join(' · '),
       zoom: ((state.zoomRatios.length > 1 ? ('×' + state.zoomRatios[state.zoomIdx]) : '') + ' ' + APP_VERSION).trim()
     });
+  }
+
+  /* 顶部状态行：连接状态文本 +（连上且已知时）云台电量，如「云台已连接 85%」 */
+  function setHudBle(txt) {
+    state.bleText = txt;
+    renderHudBle();
+  }
+
+  function renderHudBle() {
+    var txt = state.bleText || '';
+    if (state.gimbalConnected && state.gimbalBatt !== null) txt += ' ' + state.gimbalBatt + '%';
+    UI.hud({ ble: txt });
   }
 
   /* 曝光补偿显示：最多两位小数并去掉尾零（0.5 → +0.5，-1 → -1），避免浮点长串 */

@@ -24,7 +24,7 @@
   };
 
   UI.hud = function (o) {
-    if ('ble' in o) U.setText('hud-ble', o.ble);
+    if ('ble' in o) { U.setText('hud-ble', o.ble); U.show('hud-ble', !!o.ble); }
     if ('mode' in o) U.setText('hud-mode', o.mode);
     if ('rec' in o) { U.setText('hud-rec', o.rec); U.show('hud-rec', !!o.rec); }
     if ('param' in o) { U.setText('hud-param', o.param); U.show('hud-param', !!o.param); }
