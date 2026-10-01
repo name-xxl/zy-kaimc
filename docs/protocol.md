@@ -45,6 +45,18 @@ CRC  CRC16/XMODEM（init 0x0000，poly 0x1021），对 FMT..ARGS 计算，小端
 ```
 无配对/绑定（无 SMP 流量）；官方 App **不发心跳**；应答与请求同 inc 同 cmd，仅 ARGS 不同。
 
+### 接收路径（KaiOS 2.5 实测结论，2026-10-01 假云台对照实验）
+| 环节 | 实测结果 |
+|---|---|
+| App→外设 写特征值 | ✅ 正常，字节不差到达外设（PC 端 GATT 服务器日志验证） |
+| `startNotifications()` | ❌ 空壳：不写 CCCD、不派发任何事件 |
+| 手动写 CCCD `0x2902=0001` | ✅ 有效：外设立刻登记订阅（`subscribed_clients` 从 0 变 1） |
+| 外设→手机 通知 | ✅ 进入蓝牙栈，**特征对象的 `.value` 会随每条通知更新** |
+| `oncharacteristicchanged` / addEventListener | ❌ **永远不触发**（这就是 kaios.dev "KaiOS 不支持通知"的含义） |
+| `readValue()` 轮询 | ❌ 通知特征无 READ 属性，ATT 读被栈直接拒绝 |
+
+⇒ **接收实现 = 100ms 轮询 `notifyChar.value`（本地缓存读）+ 差分**，见 `app/js/main.js startPolling()`。
+
 ### 按键上报（核心）
 云台以 notify 主动推（dir 仍是 0x3C，flag=0x10）：
 ```
