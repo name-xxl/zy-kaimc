@@ -235,11 +235,11 @@
           return;
         }
         self.previewStream = c;
-        /* 传感器横装（实测 sensorAngle=270，原始帧顺时针偏 90°），
-         * 旋转补偿方向为 (360 - sensorAngle)。 */
+        /* 传感器横装（sensorAngle=270）。实测确认：预览需按 sensorAngle 本身旋转
+         * （(360-sensorAngle) 方向反了，用户目测 +180° 后即为 sensorAngle）。 */
         var ang = 0;
         try { ang = Number(c.sensorAngle) || 0; } catch (e2) { /* 读不到就不转 */ }
-        ang = ((360 - ((ang % 360) + 360) % 360) % 360);
+        ang = ((ang % 360) + 360) % 360;
         if (ang === 90 || ang === 270) {
           videoEl.style.position = 'absolute';
           videoEl.style.left = '50%';
