@@ -16,8 +16,10 @@ const Z = require(path.join(__dirname, '..', 'app', 'js', 'zhiyun.js'));
 
 const file = process.argv[2];
 const showAll = process.argv.indexOf('--all') !== -1;
+const peerIdx = process.argv.indexOf('--peer');
+const peerFilter = peerIdx !== -1 ? String(process.argv[peerIdx + 1] || '').toLowerCase() : null;
 if (!file) {
-  console.error('用法: node scripts/parse-btsnoop.js <btsnoop_hci.log> [--all]');
+  console.error('用法: node scripts/parse-btsnoop.js <btsnoop_hci.log> [--all] [--peer <地址片段>]');
   process.exit(1);
 }
 const buf = fs.readFileSync(file);
@@ -68,6 +70,7 @@ function hciCmdName(op) {
 
 const parsers = {};   /* 每句柄一个协议 Parser（分帧用） */
 const stats = {};
+const handlePeer = {}; /* ACL 句柄 → 对端地址（来自 LE Connection Complete 事件） */
 let off = 16, packets = 0, attShown = 0;
 
 while (off + 24 <= buf.length) {
@@ -89,8 +92,43 @@ while (off + 24 <= buf.length) {
       if (name) console.log(tsStr(sec, usec) + ' -> HCI_CMD ' + name + ' ' + hex(data.slice(3, 20)));
       continue;
     }
-    if (data[0] !== 0x02) continue;      /* 只看 ACL */
-    payload = data.slice(1);
+    if (data[0] === 0x02) {              /* ACL */
+      payload = data.slice(1);
+    } else if (data[0] === 0x04) {       /* HCI 事件：[04][evt][plen][params…]；LE Meta 子事件在 data[3] */
+      const evt = data[1];
+      if (evt === 0x3E && data.length >= 6) {
+        const sub = data[3];
+        const p = data.slice(4);
+        if (sub === 0x01 && p.length >= 18) {   /* LE Connection Complete */
+          const h = p.readUInt16LE(1) & 0x0FFF;
+          const addr = Array.prototype.map.call(p.slice(5, 11).reverse(),
+            (b) => ('0' + b.toString(16)).slice(-2)).join(':');
+          handlePeer[h] = addr;
+          console.log(tsStr(sec, usec) + ' EVENT LE_ConnComplete h=0x' + h.toString(16).padStart(4, '0') +
+            ' peer=' + addr + ' role=' + p[3] +
+            ' interval=' + (p.readUInt16LE(11) * 1.25) + 'ms latency=' + p.readUInt16LE(13) +
+            ' timeout=' + (p.readUInt16LE(15) * 10) + 'ms');
+        } else if (sub === 0x0A && p.length >= 29) { /* LE Enhanced Connection Complete */
+          const h = p.readUInt16LE(1) & 0x0FFF;
+          const mac = (s) => Array.prototype.map.call(p.slice(s, s + 6).reverse(),
+            (b) => ('0' + b.toString(16)).slice(-2)).join(':');
+          handlePeer[h] = mac(5);
+          console.log(tsStr(sec, usec) + ' EVENT LE_EnhancedConnComplete h=0x' + h.toString(16).padStart(4, '0') +
+            ' peer=' + mac(5) + ' role=' + p[3] +
+            ' interval=' + (p.readUInt16LE(23) * 1.25) + 'ms latency=' + p.readUInt16LE(25) +
+            ' timeout=' + (p.readUInt16LE(27) * 10) + 'ms');
+        } else if (sub === 0x03 && p.length >= 9) { /* LE Connection Update Complete */
+          const h = p.readUInt16LE(1) & 0x0FFF;
+          console.log(tsStr(sec, usec) + ' EVENT LE_ConnUpdate h=0x' + h.toString(16).padStart(4, '0') +
+            ' peer=' + (handlePeer[h] || '?') +
+            ' interval=' + (p.readUInt16LE(3) * 1.25) + 'ms latency=' + p.readUInt16LE(5) +
+            ' timeout=' + (p.readUInt16LE(7) * 10) + 'ms');
+        }
+      }
+      continue;
+    } else {
+      continue;
+    }
   } else if (datalink === 1001) {
     payload = data;                       /* 无 type 字节，假定 ACL */
   } else {
@@ -98,9 +136,12 @@ while (off + 24 <= buf.length) {
     process.exit(1);
   }
   if (payload.length < 8) continue;
+  const aclHandle = payload.readUInt16LE(0) & 0x0FFF;
   const l2len = payload.readUInt16LE(4);
   const cid = payload.readUInt16LE(6);
   const l2 = payload.slice(8, 8 + l2len);
+  const peer = handlePeer[aclHandle] || '?';
+  if (peerFilter && peer.indexOf(peerFilter) === -1) continue;
 
   if (cid === 0x0006) {                   /* SMP：配对/绑定 */
     const st = stats.SMP = (stats.SMP || 0) + 1;

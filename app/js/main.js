@@ -198,8 +198,8 @@
           dlog('✓ 云台就绪（官方 App 不发心跳，已停用；按键靠 notify 上报）');
           UI.hud({ ble: t('connected') });
           UI.toast(t('connected'));
-          /* 官方初始化（抓包实锤顺序）：跑完后云台才开始上报按键 */
-          root.setTimeout(function () { runOfficialInit(); }, 1200);
+          /* 官方初始化：抓包显示官方 App 在写完 CCCD 后 5ms 内就发第一条，这里不再延迟 */
+          runOfficialInit();
         });
     }).catch(function (err) {
       dlog('✗ 云台连接失败: ' + (err && err.message));
@@ -321,14 +321,15 @@
    *   固定帧 FMT 0x1818 → 0x06 电量。每条等应答，超时重试；跑完后云台才会
    *   以 notify 主动上报按键（cmd 0x20 / 参数 C0 xx 00） */
   var INIT_1818 = [0x24, 0x3C, 0x05, 0x00, 0x18, 0x18, 0x09, 0x00, 0x01, 0xA3, 0x16];
+  /* 时序对齐官方 App（抓包：写完 CCCD 后 ~5ms 就发第一条，后续命令间隔 ~100ms） */
   var OFFICIAL_INIT = [
-    { cmd: 0x04, tries: 3, wait: 400 },
-    { cmd: 0x7C, tries: 2, wait: 250 },
-    { cmd: 0x7D, tries: 2, wait: 250 },
-    { cmd: 0x7E, tries: 2, wait: 250 },
-    { cmd: 0x7F, tries: 2, wait: 250 },
-    { raw: INIT_1818, tag: '0x1818', tries: 2, wait: 250 },
-    { cmd: 0x06, tries: 2, wait: 250 }
+    { cmd: 0x04, wait: 150, tries: 3 },
+    { cmd: 0x7C, wait: 100, tries: 1 },
+    { cmd: 0x7D, wait: 100, tries: 1 },
+    { cmd: 0x7E, wait: 100, tries: 1 },
+    { cmd: 0x7F, wait: 100, tries: 1 },
+    { raw: INIT_1818, tag: '0x1818', wait: 100, tries: 1 },
+    { cmd: 0x06, wait: 100, tries: 2 }
   ];
 
   function sendRawFrame(bytes, tag) {
