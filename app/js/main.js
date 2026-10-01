@@ -9,12 +9,14 @@
   var cam = root.KaiCam;
   var Z = root.Zhiyun;
 
-  /* 云台按键上报 → 动作（2026-10-01 真机实测键码）：
-   *   0x3D = 拍照/录像键（正面左下）→ 快门（录像起停 / 拍照）
+  /* 云台按键上报 → 动作（2026-10-01 真机实测键码，与 M2 说明书一致）：
+   *   0x3D = 拍照/录像键【单击】→ 录像起停（说明书语义；App 里随当前模式=拍照/录像）
+   *   0x3C = 拍照/录像键【双击】→ 拍照（官方协议里 App 让云台拍照用的就是 C0 3C 00）
    *   0x17/0x27、0x18/0x28 = 变焦杆 T/W 两方向的按下+释放 → 不映射（按一下会双触发）
-   *   M 键（模式）实测不上报 BLE 事件（只在云台本地切 PF/POV）→ 无事件可映射 */
+   *   M 键（模式）、扳机键实测不上报 BLE（纯本地动作）→ 无事件可映射 */
   var BUTTON_MAP = {
-    0x3D: 'shutter'
+    0x3D: 'shutter',
+    0x3C: 'photo'
   };
 
   var APP_VERSION = 'v6';
@@ -399,6 +401,7 @@
     dlog('云台按键 code=' + (code === null ? '??' : '0x' + code.toString(16)) + ' payload=' + U.hex(f.payload));
     var action = code === null ? null : BUTTON_MAP[code];
     if (action === 'shutter') shutter();
+    else if (action === 'photo') takePhoto();
     else if (action === 'mode') switchMode();
   }
 
