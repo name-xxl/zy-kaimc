@@ -38,18 +38,15 @@ node scripts/test-session.js   # 会话层仿真回归（假适配器，不碰�
 
 ## 分发与交付
 
-交付物就是**打包应用 zip**（`manifest.webapp` + 全部文件）。两条安装路径要分清：
+交付物就是**打包应用 zip**（`manifest.webapp` + 全部文件）。本项目**只走开发者模式侧载**这一条路（自用/分享给同样开了开发者模式的人）：
 
-| 路径 | 交付物 | 需要签名？ | 适用 |
+| 路径 | 交付物 | 需要签名？ | 说明 |
 |---|---|---|---|
-| **开发者模式侧载**（WebIDE / gdeploy / adb，本项目当前方式） | 同一个 zip | **不需要** | KaiOS 2.5 机型（2720 / 8110 …）；对方需先开开发者模式，见 [docs/install-2720.md](docs/install-2720.md) |
-| **KaiStore 上架** | 同一个 zip，但必须先**签名**：`kaios-sign` 生成密钥对 → 公钥交 KaiOS 换证书 → 包内带 `META-INF` 签名 | **必须**（未签名包只能装开发机） | 面向公众分发；包大小上限 20 MB（本包约 37 KB） |
+| **开发者模式侧载**（WebIDE / gdeploy / adb）← 本项目方式 | 同一个 zip | **不需要** | 对方需先开开发者模式，见 [docs/install-2720.md](docs/install-2720.md) |
+| KaiStore 上架（**本项目无此计划**，仅备查） | 同一个 zip，另需**签名**：`kaios-sign` 生成密钥对 → 公钥交 KaiOS 换证书 → 包内带 `META-INF` 签名 | 必须（未签名包只能装开发机） | 面向公众分发；包大小上限 20 MB；中国区另有 CTA 合规要求（联网/通话记录类 privileged 应用需补 `mobiledata`/`wifidata`/`calllog` 权限并弹确认窗） |
 
-- **中国区合规（CTA）**：面向中国市场的系统是 KaiOS 2.5.2.1 / 2.5.4.1。对**联网或读通话记录**的 privileged 应用，
-  manifest 必须补 `mobiledata` / `wifidata` / `calllog` 权限并弹安装确认窗，否则不上架。
-  **本应用不联网**（只有 bluetooth / camera / storage），按官方 FAQ 原文"无需做任何修改"。
-- **KaiOS 3.0 侧载已被锁死**（Firefox/Pale Moon 的 WebIDE 已移除、未签名包直接被拒，只剩"注册开发者→签名→上架→把自己手机登记为 tester"）
-  ——这也是本项目锁定 2.5 机型的原因之一。
+- 本项目使用的就是手头的 **KaiOS 2.5** 机型，没有 3.0 适配计划；顺带记录一条背景：KaiOS 3.0 的侧载通道被锁死（Firefox/Pale Moon 的 WebIDE 已移除、未签名包被拒），所以"开发者模式 + zip"是 2.5 上最省事的自用方式。
+- **接收延迟**：蓝牙栈收到云台通知后写入特征对象的 `.value`，应用以 `config.POLL_MS`（默认 **100ms**）轮询该值做差分 → 按键从发出到响应 **平均 ~50ms、最坏 100ms**（BLE 链路本身的粒度另算：抓包实测连接间隔为空闲 30ms / App 请求快速时 7.5ms）。这是纯本地内存读取，不产生 BLE 流量；想更跟手把 `POLL_MS` 调小即可（如 30–50ms，代价是更频繁的 CPU 唤醒）。
 
 ## 按键说明（主应用）
 
