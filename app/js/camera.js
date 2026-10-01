@@ -167,11 +167,15 @@
      * 顺带把每个档位的实际分辨率读出来（真机 HAL 给了 video.width/height），菜单里可直接标注 */
     var recProfiles = c.recorderProfiles;
     var recSizes = {};
+    var recBps = {};
     if (recProfiles && !recProfiles.length && typeof recProfiles === 'object') {
       Object.keys(recProfiles).forEach(function (k) {
         try {
           var v = recProfiles[k] && recProfiles[k].video;
-          if (v && v.width && v.height) recSizes[k] = v.width + '×' + v.height;
+          if (v && v.width && v.height) {
+            recSizes[k] = v.width + '×' + v.height;
+            if (v.bitsPerSecond) recBps[k] = v.bitsPerSecond;
+          }
         } catch (e) { /* 取不到就不标 */ }
       });
       recProfiles = Object.keys(recProfiles);
@@ -181,6 +185,7 @@
       previewSizes: nonEmpty(c.previewSizes),
       recorderProfiles: nonEmpty(recProfiles),
       recorderProfileSizes: recSizes,
+      recorderProfileBps: recBps,
       whiteBalanceModes: nonEmpty(c.whiteBalanceModes),
       isoModes: nonEmpty(c.isoModes),
       sceneModes: nonEmpty(c.sceneModes),
@@ -467,7 +472,13 @@
       var profiles = [];
       try { profiles = Object.keys((this.caps && this.caps.recorderProfiles) || {}); } catch (e) { /* 无列表 */ }
       if (!profiles.length) profiles = ['low', 'default', 'high'];
-      var profile = (profiles.indexOf('high') !== -1) ? 'high' : profiles[profiles.length - 1];
+      /* 用参数菜单选定的档位（HAL 当前值），取不到再退回 default → high → 最后一个 */
+      var profile = null;
+      try { profile = c.recorderProfile; } catch (e) { /* 读不到 */ }
+      if (!profile || profiles.indexOf(profile) < 0) {
+        profile = (profiles.indexOf('default') !== -1) ? 'default'
+          : ((profiles.indexOf('high') !== -1) ? 'high' : profiles[profiles.length - 1]);
+      }
       return new Promise(function (resolve, reject) {
         /* 方向锁（UI 保险，与矩阵无关）→ setConfiguration 真等待（onerror 打日志）→
          * 300ms 定长传导 → 开录。setConfiguration 静默失败会让档位错乱。 */

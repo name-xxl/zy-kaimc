@@ -15,7 +15,7 @@
   /* 本文件只做编排：相机 + UI/键位 + 云台会话(KaiSession) + 按键分发(KaiButtons)。
    * 键码与时序常量见 config.js（AppCfg.KEY / AppCfg.*_MS） */
 
-  var APP_VERSION = 'v8.5';
+  var APP_VERSION = 'v8.6';
   var GIMBAL_NAME_RE = /CRANE[-_ ]?M2/i;
 
   var state = {
@@ -686,10 +686,12 @@
     U.show('grid-overlay', true);
   }
 
-  /* 切到下一种辅助线：视觉变化本身够明显，不弹提示 */
-  function toggleGrid() {
+  /* 切到上/下一种辅助线（d=+1 下一种、-1 上一种）；视觉变化本身够明显，不弹提示 */
+  function cycleGrid(d) {
+    var n = GRID_MODES.length;
     var i = GRID_MODES.indexOf(state.grid);
-    state.grid = GRID_MODES[(i + 1) % GRID_MODES.length];
+    if (i < 0) i = 0;
+    state.grid = GRID_MODES[((i + (d || 1)) % n + n) % n];
     try { root.localStorage.setItem(GRID_KEY, state.grid); } catch (e) { /* 无存储 */ }
     applyGrid();
   }
@@ -725,17 +727,41 @@
       return tval(v);
     }
 
-    /* 录像规格：档位名 + HAL 实际分辨率（如「默认 720×480」），并按分辨率从大到小排序，
-     * 让 ←→ 顺着画质走而不是照 HAL 的原始顺序（真机上高/默认/480p 都是 720×480） */
+    /* 录像规格：分辨率+码率相同的档位只留一个（真机上高/默认/480p 都是 720×480@2Mbps），
+     * 保留优先级 default > high > 480p > low > …；再按分辨率从大到小排序，←→ 沿画质走 */
+    var PROF_PREFER = ['default', 'high', '480p', 'low', 'qvga', 'cif', 'qcif'];
+    function profKey(n) {
+      var sz = (caps.recorderProfileSizes || {})[n] || n;
+      return sz + '@' + ((caps.recorderProfileBps || {})[n] || 0);
+    }
     function profileValues() {
-      var list = (caps.recorderProfiles || []).slice();
       var sz = caps.recorderProfileSizes || {};
-      var px = function (n) {
-        var m = /^(\d+)×(\d+)$/.exec(sz[n] || '');
-        return m ? (+m[1]) * (+m[2]) : 0;
-      };
-      list.sort(function (a, b) { return px(b) - px(a) || (a < b ? -1 : (a > b ? 1 : 0)); });
-      return list;
+      var px = function (n) { var m = /^(\d+)×(\d+)$/.exec(sz[n] || ''); return m ? (+m[1]) * (+m[2]) : 0; };
+      var list = (caps.recorderProfiles || []).slice().sort(function (a, b) {
+        var d = px(b) - px(a);
+        if (d) return d;
+        var ia = PROF_PREFER.indexOf(a), ib = PROF_PREFER.indexOf(b);
+        ia = (ia < 0) ? PROF_PREFER.length : ia;
+        ib = (ib < 0) ? PROF_PREFER.length : ib;
+        return ia - ib || (a < b ? -1 : (a > b ? 1 : 0));
+      });
+      var kept = [], seen = {};
+      list.forEach(function (n) {
+        var k = profKey(n);
+        if (seen[k]) return;
+        seen[k] = 1;
+        kept.push(n);
+      });
+      return kept;
+    }
+
+    /* 当前档位若被去重掉（如 high），切到等价的保留项，菜单与实拍保持一致 */
+    var profValues = profileValues();
+    var curProf = cam.getParam('recorderProfile');
+    if (curProf && profValues.indexOf(curProf) < 0) {
+      for (var pj = 0; pj < profValues.length; pj++) {
+        if (profKey(profValues[pj]) === profKey(curProf)) { cam.setParam('recorderProfile', profValues[pj]); break; }
+      }
     }
 
     function profText(v) {
@@ -750,7 +776,7 @@
     addCycle('pEffect', caps.effects, 'effect');
     addCycle('pFlash', caps.flashModes, 'flash');
     addCycle('pFocus', caps.focusModes, 'focus');
-    addCycle('pProfile', profileValues(), 'recorderProfile', profText);
+    addCycle('pProfile', profValues, 'recorderProfile', profText);
     if (caps.pictureSizes.length) {
       var sizes = caps.pictureSizes;
       var item = {
@@ -793,8 +819,8 @@
     items.push({
       label: t('grid'),
       valueText: gridText(),
-      cycle: function () {
-        toggleGrid();
+      cycle: function (d) {
+        cycleGrid(d);
         this.valueText = gridText();
         UI.refreshMenu();
       }
@@ -891,7 +917,7 @@
       case 'ArrowRight': case '6': ecStep(1); e.preventDefault(); break;
       case '1': cycleQuickParam('whiteBalance'); break;
       case '3': cycleQuickParam('iso'); break;
-      case '*': toggleGrid(); break;
+      case '*': cycleGrid(1); break;
       case '0': if (AppCfg.DEBUG) askBattery(); break;
       case '5': if (AppCfg.DEBUG) sayHello(); break;
       case '7': if (AppCfg.DEBUG) motionTest(); break;
