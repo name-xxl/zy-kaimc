@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<title>BLE 猎犬 — 云台通知抓取（独立于 KaiOS）</title>
+<style>
+  body { font: 13px/1.6 ui-monospace, Consolas, monospace; background: #12130f; color: #dfe3d8; margin: 14px; }
+  button { padding: 7px 12px; margin: 0 8px 8px 0; font: inherit; }
+  #log { height: 62vh; overflow: auto; border: 1px solid #3a3f33; border-radius: 6px; padding: 8px 10px; background: #0c0d0a; }
+  .hint { color: #9aa08c; }
+</style>
+</head>
+<body>
+<h3>BLE 猎犬：判定"云台到底发不发通知"</h3>
+<p class="hint">
+  1) 云台开机、别让 ZY Cami 连着 → 点<b>连接云台</b>，选择 CRANE-M2_XXXX（无需配对）<br>
+  2) 点<b>订阅通知</b>（等价于写 CCCD 0x2902=0001）→ 3) 按云台各按键，观察下方是否出现 <code>24 3E …</code> 字节<br>
+  4) 也可点<b>发 hello 帧</b>（照抄官方 App 首帧），看云台是否回话
+</p>
+<button id="conn">连接云台</button>
+<button id="sub" disabled>订阅通知</button>
+<button id="hello" disabled>发 hello 帧</button>
+<button id="clear">清空</button>
+<div id="log"></div>
+<script>
+'use strict';
+var log = function (m) {
+  var el = document.getElementById('log');
+  el.appendChild(document.createTextNode(m + '\n'));
+  el.scrollTop = el.scrollHeight;
+};
+var hex = function (dv) {
+  var u8 = new Uint8Array(dv.buffer, dv.byteOffset, dv.byteLength);
+  return Array.prototype.map.call(u8, function (b) { return ('0' + b.toString(16)).slice(-2).toUpperCase(); }).join(' ');
+};
+var dev = null, notifyChar = null, writeChar = null;
+
+/* 官方 App 抓包首帧：inc=1, cmd=0x02, 参数 00 00 00，CRC 已验 */
+var HELLO = new Uint8Array([0x24, 0x3C, 0x08, 0x00, 0x18, 0x12, 0x01, 0x01, 0x02, 0x00, 0x00, 0x00, 0x6F, 0x76]);
+
+document.getElementById('conn').onclick = function () {
+  navigator.bluetooth.requestDevice({
+    filters: [{ namePrefix: 'CRANE' }],
+    optionalServices: [0xfee9]
+  }).then(function (d) {
+    dev = d;
+    log('设备: ' + d.name);
+    d.addEventListener('gattserverdisconnected', function () { log('!! 连接断开'); });
+    return d.gatt.connect();
+  }).then(function (gatt) {
+    return gatt.getPrimaryService(0xfee9);
+  }).then(function (svc) {
+    return svc.getCharacteristics();
+  }).then(function (chars) {
+    chars.forEach(function (c) {
+      var p = c.properties;
+      log('CHR ' + c.uuid + '  props=' + [p.read && 'read', p.write && 'write', p.writeWithoutResponse && 'writeNR', p.notify && 'notify', p.indicate && 'indicate'].filter(Boolean).join('|'));
+    });
+    notifyChar = chars.find(function (c) { return c.uuid.indexOf('129601') !== -1; });
+    writeChar = chars.find(function (c) { return c.uuid.indexOf('129600') !== -1; });
+    if (!notifyChar) { log('!! 未找到 129601'); return; }
+    notifyChar.addEventListener('characteristicvaluechanged', function (e) {
+      log(new Date().toLocaleTimeString() + '  <-  ' + hex(e.target.value));
+    });
+    document.getElementById('sub').disabled = false;
+    document.getElementById('hello').disabled = !writeChar;
+    log('已拿到特征，请点「订阅通知」');
+  }).catch(function (e) { log('失败: ' + e); });
+};
+
+document.getElementById('sub').onclick = function () {
+  notifyChar.startNotifications().then(function () {
+    log('已订阅通知（CCCD 已写）：现在按云台按键，看有没有 24 3E …');
+  }).catch(function (e) { log('订阅失败: ' + e); });
+};
+
+document.getElementById('hello').onclick = function () {
+  var p = writeChar.writeValueWithoutResponse
+    ? writeChar.writeValueWithoutResponse(HELLO)
+    : writeChar.writeValue(HELLO);
+  p.then(function () { log('->  已发 hello 帧 ' + hex(HELLO)); })
+   .catch(function (e) { log('发送失败: ' + e); });
+};
+
+document.getElementById('clear').onclick = function () {
+  document.getElementById('log').textContent = '';
+};
+</script>
+</body>
+</html>
