@@ -98,13 +98,13 @@
     return this.client.send(cmd, args);
   };
 
-  /* 发原始字节帧（如 FRAME_1818 / FRAME_1817） */
-  Session.prototype.sendRaw = function (bytes) {
+  /* 发原始字节帧（如 FRAME_1818 / FRAME_1817）；quiet=true 时不打 TX 日志（周期查询用） */
+  Session.prototype.sendRaw = function (bytes, quiet) {
     var self = this;
     if (!this.conn) return Promise.reject(new Error('未连接'));
     var u8 = new Uint8Array(bytes);
     return bt.write(this.conn, u8.buffer).then(function () {
-      self.log('TX ' + U.hex(u8));
+      if (!quiet) self.log('TX ' + U.hex(u8));
     });
   };
 
