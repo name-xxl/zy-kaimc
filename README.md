@@ -25,7 +25,8 @@ dist/           构建产物 zy-kaimc.zip / zy-probe.zip
 ## 构建
 
 ```
-node scripts/build.js
+node scripts/build.js          # 语法 + 协议自测 + 同步共享 JS + 打包
+node scripts/test-session.js   # 会话层仿真回归（假适配器，不碰真机）
 ```
 
 自动完成：全部 JS 语法检查、manifest 校验、CRC16/帧编解码自测（含 Weebill-S 实测心跳样例）、

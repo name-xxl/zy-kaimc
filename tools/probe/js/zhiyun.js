@@ -96,10 +96,10 @@
       var leLen = this.buf[i + 2] | (this.buf[i + 3] << 8);
       var beLen = (this.buf[i + 2] << 8) | this.buf[i + 3];
       var cand = null, alt = null;
-      if (leLen >= 6 && leLen <= Parser.MAX_BODY) {
+      if (leLen >= 4 && leLen <= Parser.MAX_BODY) {
         cand = leLen;
-        if (beLen >= 6 && beLen <= Parser.MAX_BODY) alt = beLen;
-      } else if (beLen >= 6 && beLen <= Parser.MAX_BODY) {
+        if (beLen >= 4 && beLen <= Parser.MAX_BODY) alt = beLen;
+      } else if (beLen >= 4 && beLen <= Parser.MAX_BODY) {
         cand = beLen;
       }
       if (cand === null) { i++; keepFrom = i; continue; }
@@ -119,16 +119,21 @@
           cand = alt; f = f2; endPayload = end2; okA = true;
         }
       }
+      /* 字段口径：0x1812 命令帧 = inc(6) flag(7) cmd(8) args(9..)；
+       * 其余（心跳 0x1815 / 会话帧 0x1818 / 状态帧 0x1817）沿用旧口径 cmd=f[9]，
+       * 短帧（长度不足）只保证能解析出 raw，语义由调用方按 FMT 自行取 */
+      var fmt = (f[4] << 8) | f[5];
+      var isCmd = fmt === FMT_CMD;
+      var hasOld = f.length >= 10;
       frames.push({
         dir: f[1],
         len: cand,
-        format: (f[4] << 8) | f[5],
+        format: fmt,
         seq: (f[6] << 8) | f[7],
-        /* 2026-10-01 官方 App 抓包实锤：0x1812 帧的字段是 inc(6) flag(7) cmd(8) args(9..)
-         * （App 请求 flag=01；云台应答/按键上报 flag=10）；心跳 0x1815 保持旧口径 */
-        type: ((f[4] << 8) | f[5]) === FMT_CMD ? f[7] : f[8],
-        cmd: ((f[4] << 8) | f[5]) === FMT_CMD ? f[8] : f[9],
-        payload: new Uint8Array(f.subarray(((f[4] << 8) | f[5]) === FMT_CMD ? 9 : 10, endPayload)),
+        flag: isCmd ? f[7] : (hasOld ? f[7] : 0),
+        cmd: isCmd ? f[8] : (hasOld ? f[9] : 0),
+        type: isCmd ? f[7] : (hasOld ? f[8] : 0),
+        payload: new Uint8Array(f.subarray(isCmd ? 9 : (hasOld ? 10 : 6), endPayload)),
         raw: new Uint8Array(f),
         crcOk: okA || okB
       });
