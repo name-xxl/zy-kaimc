@@ -20,6 +20,7 @@
       skShutter: '快门',
       skBack: '返回',
       skClose: '关闭',
+      skEnter: '进入',
       about: '关于',
       aboutTitle: '关于 ZY-KaiCam',
       aboutVer: '版本',
@@ -81,6 +82,7 @@
       skShutter: 'Shutter',
       skBack: 'Back',
       skClose: 'Close',
+      skEnter: 'Open',
       about: 'About',
       aboutTitle: 'About ZY-KaiCam',
       aboutVer: 'Version',
@@ -144,7 +146,7 @@
     'continuous-picture': '连续对焦·照片', 'continuous-video': '连续对焦·视频', 'continuous-picture-video': '连续对焦',
     high: '高', low: '低', cif: 'CIF', qcif: 'QCIF',
     /* 2720 相机 HAL 实测取值（2026-10-02 从真机 capabilities 抄录）里不在上表的 */
-    'cloudy-daylight': '阴天', manual: '手动', hjr: '高感光', asd: '自动场景',
+    'cloudy-daylight': '阴天', manual: '手动', hjr: '高感光', asd: '自动场景识别',
     sports: '运动', flowers: '花卉', candlelight: '烛光', whiteboard: '白板', blackboard: '黑板',
     fixed: '固定焦距', qvga: 'QVGA', '480p': '标清', ar: 'AR'
   };

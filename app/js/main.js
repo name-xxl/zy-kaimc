@@ -19,7 +19,7 @@
   var Dbg = root.KaiDbg;
   var Menu = root.KaiMenu;
 
-  var APP_VERSION = 'v8.7';
+  var APP_VERSION = 'v8.8';
   var GIMBAL_NAME_RE = /CRANE[-_ ]?M2/i;
 
   /* 云台链路状态 */
@@ -693,6 +693,12 @@
     renderHudParams();
   }
 
+  /* 菜单里中键的含义跟着选中项走：可进入的项（关于）显示「进入」；参数项不显示中键文案 */
+  UI.onMenuSel = function (it) {
+    if (!UI.menuActive()) return;
+    UI.setSoftkeys(t('skBack'), (it && it.open) ? t('skEnter') : '', t('skMode'));
+  };
+
   function openAbout() {
     UI.renderAbout(APP_VERSION);
     UI.showView('about');
@@ -738,8 +744,7 @@
       if (k === 'Enter') {
         var sel = UI.selectedItem();
         if (sel && sel.open) { sel.open(); return; }   /* 二级页（关于） */
-        closeMenu();
-        return;
+        return;                                        /* 参数项按中键无动作（改值用 ←→） */
       }
       if (k === 'SoftLeft') { closeMenu(); return; }
       if (k === 'SoftRight') { switchMode(); return; }

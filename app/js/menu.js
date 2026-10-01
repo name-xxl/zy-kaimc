@@ -181,7 +181,8 @@
     });
 
     UI.openMenu(items);
-    UI.setSoftkeys(t('skBack'), t('skClose'), t('skMode'));
+    /* 中键文案由 main.js 的 UI.onMenuSel 按选中项决定（只有"关于"可进入） */
+    UI.setSoftkeys(t('skBack'), '', t('skMode'));
   }
 
   root.KaiMenu = { open: open };

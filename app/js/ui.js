@@ -12,6 +12,9 @@
     U.setText('menu-title', root.Strings.t('menuTitle'));
   };
 
+  /* 供上层注册：菜单选中项变化时回调（用于动态设置中键文案/动作） */
+  UI.onMenuSel = null;
+
   UI.setSoftkeys = function (left, center, right) {
     U.setText('sk-left', left || '');
     U.setText('sk-center', center || '');
@@ -173,6 +176,8 @@
     });
     var sel = ul.children[menuIdx];
     if (sel) ul.scrollTop = sel.offsetTop - ul.clientHeight / 2;
+    /* 选中项变化时通知上层（软键文案要跟着变：只有可进入的项才显示"进入"） */
+    if (UI.onMenuSel) UI.onMenuSel(menuItems[menuIdx] || null);
   };
 
   UI.refreshMenu = UI._renderMenu;
