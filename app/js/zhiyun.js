@@ -115,6 +115,32 @@
     return frames;
   };
 
+  /* 官方 App 抓包实测的 app→gimbal 帧形（与本文件 buildFrame 的差异：序号只有 1 字节，后随固定 0x01）：
+   *   24 3C <LEN:2B> 18 12 <inc:1B> 01 <cmd> <data…> <CRC16 小端>
+   * 依据：petermaguire.xyz 抓包样例 24 3C 08 00 18 12 01 01 02 00 00 00 6F 76
+   * （本仓库 crc16 对 FMT..data 计算 = 0x766F 已验证）+ bleebil 客户端同形构造 */
+  var officialInc = 0;
+  function buildOfficialFrame(cmd, data) {
+    data = data || [0x00, 0x00, 0x00];   /* 官方帧的参数常为 3 字节（NO_ARGUMENT） */
+    officialInc = (officialInc + 1) & 0xFF;
+    var body = 2 + 1 + 1 + 1 + data.length;   /* FMT + inc + 0x01 + cmd + data */
+    var out = new Uint8Array(4 + body + 2);
+    out[0] = 0x24;
+    out[1] = DIR_APP2G;
+    out[2] = (body >> 8) & 0xFF;
+    out[3] = body & 0xFF;
+    out[4] = 0x18;
+    out[5] = 0x12;
+    out[6] = officialInc;
+    out[7] = 0x01;
+    out[8] = cmd & 0xFF;
+    for (var i = 0; i < data.length; i++) out[9 + i] = data[i] & 0xFF;
+    var crc = crc16(out, 4, 9 + data.length);
+    out[9 + data.length] = crc & 0xFF;
+    out[10 + data.length] = (crc >> 8) & 0xFF;
+    return out;
+  }
+
   /* 会话层：发命令、心跳保活、帧/按键事件分发（含重复包去重） */
   function Client(writeFn, opts) {
     opts = opts || {};
@@ -173,6 +199,7 @@
   root.Zhiyun = {
     crc16: crc16,
     buildFrame: buildFrame,
+    buildOfficialFrame: buildOfficialFrame,
     Parser: Parser,
     Client: Client,
     DIR_APP2G: DIR_APP2G,

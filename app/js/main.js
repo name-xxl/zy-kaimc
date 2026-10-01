@@ -205,11 +205,12 @@
           dlog('✓ 云台就绪(心跳1s)');
           UI.hud({ ble: t('connected') });
           UI.toast(t('connected'));
-          /* 主动探测：2s 后发一次电量查询(0x06)，云台若有应答会出现在 [IN#] 行 */
-          root.setTimeout(function () { askBattery(); }, 2000);
+          /* 主动探测：照抄官方 App 帧形各发一次（0x02 首帧 / 0x06 电量），有应答会出现在 [IN#] 行 */
+          root.setTimeout(function () { sayHello(); }, 2000);
+          root.setTimeout(function () { askBattery(); }, 3500);
           root.setTimeout(function () {
-            if (state.rxCount === 0) dlog('6s 无云台数据（对照 docs/protocol.md 待验证项）');
-          }, 6000);
+            if (state.rxCount === 0) dlog('7s 无云台数据（对照 docs/protocol.md 待验证项）');
+          }, 7000);
         });
     }).catch(function (err) {
       dlog('✗ 云台连接失败: ' + (err && err.message));
@@ -311,14 +312,20 @@
     return true;
   }
 
-  function askBattery() {
-    if (!state.client) return;
-    state.client.send(0x06, []).then(function () {
-      dlog('[OUT] 电量查询(0x06)已发');
+  /* 官方帧形探测（见 Zhiyun.buildOfficialFrame）：照抄官方 App 的 app→gimbal 帧形与参数长度。
+   * 我们的旧帧形（16 位序号 + TYPE）可能不被云台接受，这里是关键对照实验 */
+  function probeOfficial(cmd, tag) {
+    if (!state.conn) return;
+    var frame = Z.buildOfficialFrame(cmd);
+    bt.write(state.conn, frame.buffer).then(function () {
+      dlog('[OUT] ' + tag + ' 官方帧 ' + U.hex(frame));
     }).catch(function (e) {
-      dlog('[OUT] 电量查询失败: ' + ((e && (e.message || e.name)) || e));
+      dlog('[OUT] ' + tag + ' 失败: ' + ((e && (e.message || e.name)) || e));
     });
   }
+
+  function askBattery() { probeOfficial(0x06, '电量查询'); }
+  function sayHello() { probeOfficial(0x02, 'hello'); }
 
   /* ---------- 云台事件 ---------- */
 
@@ -621,6 +628,7 @@
       case '1': cycleQuickParam('whiteBalance'); break;
       case '3': cycleQuickParam('iso'); break;
       case '0': askBattery(); break;
+      case '5': sayHello(); break;
       case '9': retryCamera(); break;
     }
   }
