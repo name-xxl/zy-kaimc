@@ -422,7 +422,10 @@
       if (!profiles.length) profiles = ['low', 'default', 'high'];
       var profile = (profiles.indexOf('high') !== -1) ? 'high' : profiles[profiles.length - 1];
       return new Promise(function (resolve, reject) {
-        try { c.setConfiguration({ mode: 'video', recorderProfile: profile }); } catch (e3) { /* 继续尝试 */ }
+        /* 实测（2720）：编码帧恒为横向原始帧；竖屏播放器忽略 tkhd 矩阵，
+         * 全屏播放器遵守矩阵。setConfiguration 的 rotation=180 → 90° 矩阵
+         * → 全屏播放转正（竖屏播放横视频本就是 KaiOS 的固定行为）。 */
+        try { c.setConfiguration({ mode: 'video', recorderProfile: profile, rotation: 180 }); } catch (e3) { /* 继续尝试 */ }
         root.setTimeout(function () {
           var filename = videoFilename(profile);
           try {

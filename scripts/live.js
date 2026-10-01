@@ -66,7 +66,7 @@ async function main() {
   await request({ to: actors.webappsActor, type: 'close', manifestURL: APP });
   await new Promise((res) => setTimeout(res, 1500));
   await request({ to: actors.webappsActor, type: 'launch', manifestURL: APP });
-  await new Promise((res) => setTimeout(res, 6000));
+  await new Promise((res) => setTimeout(res, 12000));
   console.log('SANITY: ' + await evalNow('1+1'));
   for (let i = 0; i < args.length; i += 2) {
     const file = args[i];
