@@ -104,22 +104,43 @@ if (!fs.existsSync(path.join(rootDir, 'app/icons/icon112.png'))) {
   execFileSync(process.execPath, [path.join(rootDir, 'scripts/make-icons.js')], { stdio: 'inherit' });
 }
 
-/* 6) 打包 */
+/* 6) 打包：产物带版本号（交付件），并留一份不带版本号的最新副本（脚本/文档引用用） */
+function manifestVersion(relManifest) {
+  try {
+    return JSON.parse(fs.readFileSync(path.join(rootDir, relManifest), 'utf8')).version || '0.0';
+  } catch (e) {
+    return '0.0';
+  }
+}
+const appVer = manifestVersion('app/manifest.webapp');
+const probeVer = manifestVersion('tools/probe/manifest.webapp');
+/* 版本一致性：main.js 的 APP_VERSION（HUD 显示）应与 manifest 主版本一致，防交付版本错配 */
+try {
+  const m = /APP_VERSION\s*=\s*'v(\d+)/.exec(fs.readFileSync(path.join(rootDir, 'app/js/main.js'), 'utf8'));
+  check(!!m && appVer.split('.')[0] === m[1],
+    '版本一致：HUD v' + (m && m[1]) + ' ↔ manifest ' + appVer);
+} catch (e) {
+  check(false, '版本一致性检查异常: ' + e.message);
+}
+
 fs.mkdirSync(path.join(rootDir, 'dist'), { recursive: true });
-function zipApp(appDir, zipName, entries) {
-  const zip = path.join(rootDir, 'dist', zipName);
-  try { fs.unlinkSync(zip); } catch (e) { /* 首次无文件 */ }
-  execFileSync('C:\\Windows\\System32\\tar.exe', ['-a', '-c', '-f', zip, ...entries], {
+function zipApp(appDir, baseName, version, entries) {
+  const versioned = path.join(rootDir, 'dist', baseName + '-' + version + '.zip');
+  const latest = path.join(rootDir, 'dist', baseName + '.zip');
+  try { fs.unlinkSync(versioned); } catch (e) { /* 首次无文件 */ }
+  execFileSync('C:\\Windows\\System32\\tar.exe', ['-a', '-c', '-f', versioned, ...entries], {
     cwd: path.join(rootDir, appDir)
   });
-  const size = fs.statSync(zip).size;
-  console.log('✓ 打包 ' + appDir + ' → dist/' + zipName + ' (' + size + ' B)');
+  fs.copyFileSync(versioned, latest);
+  const size = fs.statSync(versioned).size;
+  console.log('✓ 打包 ' + appDir + ' → dist/' + baseName + '-' + version + '.zip (' + size + ' B；' +
+    baseName + '.zip 为最新副本)');
 }
 
 if (!fail) {
   try {
-    zipApp('app', 'zy-kaimc.zip', ['manifest.webapp', 'index.html', 'css', 'js', 'icons']);
-    zipApp('tools/probe', 'zy-probe.zip', ['manifest.webapp', 'index.html', 'css', 'js', 'icons']);
+    zipApp('app', 'zy-kaimc', appVer, ['manifest.webapp', 'index.html', 'css', 'js', 'icons']);
+    zipApp('tools/probe', 'zy-probe', probeVer, ['manifest.webapp', 'index.html', 'css', 'js', 'icons']);
   } catch (e) {
     check(false, '打包失败: ' + e.message);
   }
