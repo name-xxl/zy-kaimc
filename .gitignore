@@ -1,3 +1,5 @@
 dist/
 *.zip
 .zcode/
+logs/
+app-web/

@@ -1,1 +1,0 @@
-JSON.stringify(window.__x || null) + ' photo2=' + (window.__photo || '-')
