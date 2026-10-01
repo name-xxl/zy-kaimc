@@ -15,7 +15,7 @@
   /* 本文件只做编排：相机 + UI/键位 + 云台会话(KaiSession) + 按键分发(KaiButtons)。
    * 键码与时序常量见 config.js（AppCfg.KEY / AppCfg.*_MS） */
 
-  var APP_VERSION = 'v7.8';
+  var APP_VERSION = 'v7.9';
   var GIMBAL_NAME_RE = /CRANE[-_ ]?M2/i;
 
   var state = {
@@ -29,6 +29,8 @@
     gimbalMode: null,
     gimbalConnected: false,
     bleText: '',
+    lastKeyAt: 0,
+    lastModeQuery: 0,
     battTimer: null,
     modeTimer: null,
     rxCount: 0,
@@ -218,7 +220,7 @@
     }).catch(function (err) {
       dlog('✗ 云台连接失败: ' + (err && err.message));
       state.gimbalConnected = false;
-      setHudBle('BT ✗');
+      setHudBle(t('btBad'));
       UI.toast(err.message || t('btFail'), 3500);
       scheduleReconnect();
     });
@@ -274,11 +276,28 @@
       queryBattery();                                   /* 连上先查一次 */
       state.battTimer = root.setInterval(queryBattery, AppCfg.BATTERY_QUERY_MS);
     }
+    /* 模式查询：M 键/扳机不上报（云台不推模式变化），只能主动问。
+     * 空闲按 MODE_QUERY_MS；一旦收到云台按键（说明人正在操作）就压到 MODE_QUERY_FAST_MS，
+     * 持续 MODE_FAST_TAIL_MS 无按键后回落。250ms 本地 tick 只判断"到点没"，
+     * 真正发帧按上面节奏走——多几个 14 字节小包，射频开销可忽略 */
+    state.lastKeyAt = 0;
+    state.lastModeQuery = 0;
     if (AppCfg.MODE_QUERY_MS) {
       state.modeTimer = root.setInterval(function () {
-        if (session) session.sendRaw(AppCfg.FRAME_MODE_QUERY, true).catch(function () { /* 忽略 */ });
-      }, AppCfg.MODE_QUERY_MS);
+        if (!session) return;
+        var now = Date.now();
+        if (now - state.lastModeQuery < modeQueryDelay(now)) return;
+        state.lastModeQuery = now;
+        session.sendRaw(AppCfg.FRAME_MODE_QUERY, true).catch(function () { /* 忽略 */ });
+      }, 250);
     }
+  }
+
+  /* 当前该用多长的查询间隔：人刚动过云台 → 快 */
+  function modeQueryDelay(now) {
+    var fast = AppCfg.MODE_QUERY_FAST_MS, tail = AppCfg.MODE_FAST_TAIL_MS;
+    if (fast && tail && state.lastKeyAt && (now - state.lastKeyAt) < tail) return fast;
+    return AppCfg.MODE_QUERY_MS;
   }
 
   function stopQueries() {
@@ -375,6 +394,7 @@
 
   function onGimbalButton(f) {
     /* 键码在 payload 第二字节（格式 C0 <码> 00）；未登记的键码只记日志不动作 */
+    state.lastKeyAt = Date.now();   /* 人在操作 → 模式查询提速（见 startQueries） */
     var code = Buttons.codeOf(f);
     dlog('云台按键 code=' + (code === null ? '??' : '0x' + code.toString(16)) + ' payload=' + U.hex(f.payload));
     Buttons.handle(code);
@@ -423,10 +443,10 @@
     if (!cam.recording) {
       cam.startRecording().then(function () {
         state.recSecs = 0;
-        UI.hud({ rec: '● REC 00:00' });
+        UI.hud({ rec: t('recHud') + '00:00' });
         state.recTimer = root.setInterval(function () {
           state.recSecs++;
-          UI.hud({ rec: '● REC ' + fmtTime(state.recSecs) });
+          UI.hud({ rec: t('recHud') + fmtTime(state.recSecs) });
         }, 1000);
       }).catch(function (err) {
         dlog('✗ 录像: ' + (err && err.message));
@@ -497,7 +517,7 @@
   }
 
   function zoomStep(d) {
-    if (state.zoomRatios.length < 2) { UI.toast(t('zoom') + ': N/A'); return; }
+    if (state.zoomRatios.length < 2) { UI.toast(t('zoom') + ' ' + t('na')); return; }
     state.zoomIdx = Math.min(state.zoomRatios.length - 1, Math.max(0, state.zoomIdx + d));
     var r = state.zoomRatios[state.zoomIdx];
     cam.setParam('zoom', r);
@@ -505,7 +525,7 @@
   }
 
   function ecStep(d) {
-    if (!state.ecList.length) { UI.toast(t('pEc') + ': N/A'); return; }
+    if (!state.ecList.length) { UI.toast(t('pEc') + ' ' + t('na')); return; }
     var idx = state.ecList.indexOf(state.ecNow);
     if (idx === -1) idx = state.ecList.indexOf(0);
     if (idx === -1) idx = 0;
@@ -669,7 +689,7 @@
     if (!items.length) items.push({ label: t('noParams'), valueText: '' });
 
     UI.openMenu(items);
-    UI.setSoftkeys(t('skBack'), 'OK', t('skMode'));
+    UI.setSoftkeys(t('skBack'), t('skClose'), t('skMode'));
   }
 
   function closeMenu() {
