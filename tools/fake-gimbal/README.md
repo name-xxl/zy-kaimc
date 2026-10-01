@@ -28,7 +28,7 @@ py tools/fake-gimbal/fake_gimbal.py --notify 4
 ## 已知限制与坑
 
 - **广播名不可自定义**：WinRT 的 `BluetoothLEAdvertisementPublisher` 不接受本地名（会报参数错误），
-  provider 的广播用系统蓝牙名（如 `NAME_XXL`）。因此应用侧"按名字匹配"的逻辑连不上它，
+  provider 的广播用系统蓝牙名（即电脑的蓝牙名，本机实测时需按实际名字匹配）。因此应用侧"按名字匹配"的逻辑连不上它，
   需要 `tools/diag/bt-fake-diag*.js` 这类"自定义扫描/直连地址"的注入脚本来驱动。
 - 同时只能有一个进程持有该服务：重跑前先结束旧的 python 进程，否则第二个实例起不来（日志会写乱）。
 - 结论：KaiOS 侧**写特征值会字节不差地到达外设**；通知**能进栈并更新 `.value`，但 JS 事件永不触发**。

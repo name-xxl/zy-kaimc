@@ -15,7 +15,7 @@
         var d = e.device;
         if (!D.seen[d.address]) { D.seen[d.address] = 1; L('dev ' + (d.name || '(noname)') + ' @' + d.address + ' gatt=' + (d.gatt ? 'y' : 'n') + ' type=' + d.type); }
         if (D.dev) return;
-        if (/NAME_XXL|FAKE/i.test(d.name || '')) { D.dev = d; L('PICK ' + d.name); }
+        if (/FAKE|CRANE|M2/i.test(d.name || '')) { D.dev = d; L('PICK ' + d.name); }
         else if (!D.anyDev) { D.anyDev = d; }
       };
       return new Promise(function (res) { setTimeout(res, 12000); });

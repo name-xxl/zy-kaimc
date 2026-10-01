@@ -9,7 +9,7 @@
     L('adapter ok');
     return bt.startScan(function (dev) {
       if (D.dev) return;
-      if (/NAME_XXL|FAKE/i.test(dev.name || '')) { D.dev = dev; L('PICK ' + dev.name); }
+      if (/FAKE|CRANE|M2/i.test(dev.name || '')) { D.dev = dev; L('PICK ' + dev.name); }
       else if (/CRANE/i.test(dev.name || '')) { D.anyDev = dev; }
     });
   }).then(function (h) {

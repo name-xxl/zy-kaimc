@@ -1,6 +1,6 @@
 # 智云云鹤 M2 BLE 协议笔记
 
-## 已知部分（2026-10-01 ZY Play 抓包实锤，原始解析见 logs/zyplay-cap1.txt / cap2.txt；早期资料：Weebill-S / Crane 2S 逆向）
+## 已知部分（2026-10-01 ZY Play 抓包实锤，原始解析见 docs/capture-zyplay-2026-10-01.txt（仅云台链路、MAC 已打码）；早期资料：Weebill-S / Crane 2S 逆向）
 
 来源：
 - https://petermaguire.xyz/posts/zhiyun-weebil-s-ble-protocol/ （Weebill-S 完整逆向）
@@ -18,7 +18,7 @@
 | App→云台（writeWithoutResponse） | `d44bc439-abfd-45a2-b575-925416129600` |
 | 云台→App（notify） | `d44bc439-abfd-45a2-b575-925416129601` |
 
-Android nRF Connect 实测（2026-10-01，CRANE-M2_AB53 / c4:4f:33:7c:ab:53，未配对直连）：
+Android nRF Connect 实测（2026-10-01，CRANE-M2_XXXX / c4:4f:33:xx:xx:xx，未配对直连）：
 - 129600：**Properties: WRITE NO RESPONSE**（无 READ/NOTIFY）
 - 129601：**Properties: NOTIFY**，含 **CCCD 描述符 0x2902**（即我们手动写 `0x2902=0x0001` 是正确使能值；该特征无 READ，轮询读值不可能）
 - 服务表共 3 个：`0x1800`（GAP）、`0x1801`（GATT）、`0xFEE9`
