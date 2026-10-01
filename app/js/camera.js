@@ -422,30 +422,32 @@
       if (!profiles.length) profiles = ['low', 'default', 'high'];
       var profile = (profiles.indexOf('high') !== -1) ? 'high' : profiles[profiles.length - 1];
       return new Promise(function (resolve, reject) {
-        /* 实测（2720）：编码帧恒为横向原始帧；竖屏播放器忽略 tkhd 矩阵，
-         * 全屏播放器遵守矩阵。setConfiguration 的 rotation=180 → 90° 矩阵
-         * → 全屏播放转正（竖屏播放横视频本就是 KaiOS 的固定行为）。 */
-        try { c.setConfiguration({ mode: 'video', recorderProfile: profile, rotation: 180 }); } catch (e3) { /* 继续尝试 */ }
+        /* 先锁方向并留出传导时间（实测：锁完立刻录会来不及生效），
+         * 之后 setConfiguration 只带 mode/profile——不要带 rotation，
+         * 方向由窗口方向状态决定（已锁定竖屏 → 帧烤入正立）。 */
+        U.lockPortrait();
         root.setTimeout(function () {
-          var filename = videoFilename(profile);
-          try {
-            /* rotation = 设备显示朝向（竖屏应用恒为 0），不是传感器角度 */
-            var p = c.startRecording({ rotation: 0, maxFileSizeBytes: 536870912, createPoster: false },
-              storage, filename);
-            self.recording = true;
-            self.dbg('✓ 录像开始 ' + filename + ' (' + profile + ')');
-            if (p && typeof p.then === 'function') {
-              p.then(function () { /* 停止后落定 */ }, function (err) {
-                self.recording = false;
-                self.dbg('✗ 录像中断 ' + (err && err.name));
-              });
+          try { c.setConfiguration({ mode: 'video', recorderProfile: profile }); } catch (e3) { /* 继续尝试 */ }
+          root.setTimeout(function () {
+            var filename = videoFilename(profile);
+            try {
+              var p = c.startRecording({ rotation: 0, maxFileSizeBytes: 536870912, createPoster: false },
+                storage, filename);
+              self.recording = true;
+              self.dbg('✓ 录像开始 ' + filename + ' (' + profile + ')');
+              if (p && typeof p.then === 'function') {
+                p.then(function () { /* 停止后落定 */ }, function (err) {
+                  self.recording = false;
+                  self.dbg('✗ 录像中断 ' + (err && err.name));
+                });
+              }
+              resolve(filename);
+            } catch (e) {
+              self.dbg('✗ 录像 ' + e.name + ':' + e.message);
+              reject(new Error('录像失败: ' + e.message));
             }
-            resolve(filename);
-          } catch (e) {
-            self.dbg('✗ 录像 ' + e.name + ':' + e.message);
-            reject(new Error('录像失败: ' + e.message));
-          }
-        }, 600);
+          }, 500);
+        }, 500);
       });
     }
 
@@ -536,8 +538,9 @@
   }
 
   function videoFilename(profile) {
-    var ext = (profile && String(profile).indexOf('3gp') !== -1) ? '3gp' : 'mp4';
-    return 'DCIM/ZYKaiCam/VID_' + stamp() + '.' + ext;
+    /* 实测（2720）：KaiOS 播放器只对 .3gp 文件应用 tkhd 旋转矩阵，
+     * .mp4 同样的内容会横转 90° 播放 → 与系统相机一致使用 .3gp */
+    return 'DCIM/ZYKaiCam/VID_' + stamp() + '.3gp';
   }
 
   root.KaiCam = new Cam();

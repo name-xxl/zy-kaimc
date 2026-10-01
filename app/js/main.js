@@ -14,6 +14,7 @@
     0x20: 'shutter'
   };
 
+  var APP_VERSION = 'v5';
   var GIMBAL_NAME_RE = /CRANE[-_ ]?M2/i;
 
   var state = {
@@ -55,17 +56,6 @@
     } catch (e) { /* 不支持就维持普通布局 */ }
   }
 
-  /* 锁定竖屏方向：Gecko 录像管线按窗口方向角决定写入视频的旋转，
-   * 不锁的话录出来的视频是横的（实测）。 */
-  function lockPortrait() {
-    try {
-      if (root.screen && root.screen.orientation && root.screen.orientation.lock) {
-        var p = root.screen.orientation.lock('portrait');
-        if (p && typeof p.catch === 'function') p.catch(function () { /* 失败不影响拍摄 */ });
-      }
-    } catch (e) { /* 不支持就跳过 */ }
-  }
-
   /* ---------- 调试面板（取景界面按 # 开关） ---------- */
 
   function dlog(msg) {
@@ -95,8 +85,9 @@
   function boot() {
     UI.init();
     goFullscreen();
-    lockPortrait();
+    U.lockPortrait();
     setFinderKeys();
+    UI.toast('ZY-KaiCam ' + APP_VERSION, 2500);
     UI.hud({ ble: t('camInit'), mode: t('modePhoto') });
     root.addEventListener('keydown', onKey);
     root.document.addEventListener('visibilitychange', onVis);
@@ -292,7 +283,7 @@
   /* ---------- 快门 ---------- */
 
   function shutter() {
-    lockPortrait();
+    U.lockPortrait();
     if (state.mode === 'picture') takePhoto();
     else toggleRecord();
   }
@@ -436,7 +427,7 @@
     if (state.gimbalBatt !== null) parts.push(t('gimbalBatt') + ' ' + state.gimbalBatt + '%');
     UI.hud({
       param: parts.join('  '),
-      zoom: state.zoomRatios.length > 1 ? ('×' + state.zoomRatios[state.zoomIdx]) : ''
+      zoom: ((state.zoomRatios.length > 1 ? ('×' + state.zoomRatios[state.zoomIdx]) : '') + ' ' + APP_VERSION).trim()
     });
   }
 
@@ -591,7 +582,7 @@
       cam.stopPreview();
     } else {
       goFullscreen();
-      lockPortrait();
+      U.lockPortrait();
       if (cam.control) {
         cam.startPreview(U.byId('preview')).catch(function () {});
       }

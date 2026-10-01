@@ -126,6 +126,7 @@
       setStatus('已连接 ' + (S.devices[addr2] ? (S.devices[addr2].name || addr2) : ''));
     }).catch(function (e) {
       log('✗ 连接失败: ' + (e && e.message));
+      log('（按 7 深挖固件 API，确认有没有 GATT 入口）');
       setStatus('连接失败');
     });
   }
@@ -192,6 +193,53 @@
     setStatus('已断开（软左=重扫）');
   }
 
+  /* ---------- 固件 API 深挖（按 7） ---------- */
+
+  /* 实例 + 原型链的全部属性名（WebIDL 属性挂在原型上，Object.keys 看不到） */
+  function propNames(obj) {
+    var names = [];
+    var seen = {};
+    for (var o = obj, depth = 0; o && depth < 4; depth++, o = Object.getPrototypeOf(o)) {
+      var own;
+      try { own = Object.getOwnPropertyNames(o); } catch (e) { break; }
+      own.forEach(function (n) { if (!seen[n]) { seen[n] = true; names.push(n); } });
+    }
+    return names;
+  }
+
+  function deepDump() {
+    log('—— 固件 API 深挖 ——');
+    var mgr = root.navigator.mozBluetooth;
+    log('mgr[' + (mgr ? propNames(mgr).join('|') : '(无)') + ']');
+    var a = bt.adapter;
+    log('adapter[' + (a ? propNames(a).join('|') : '(无)') + ']');
+    var addr = S.order[S.sel];
+    var d = addr && S.devices[addr];
+    if (d) log('扫描设备[' + propNames(d).join('|') + ']');
+    if (!a || typeof a.getPairedDevices !== 'function') {
+      log('✗ 无 getPairedDevices，配对兜底路线也不存在');
+      return;
+    }
+    U.prom(a.getPairedDevices(), 'getPairedDevices').then(function (list) {
+      list = list || [];
+      log('配对设备 ' + list.length + ' 个');
+      list.forEach(function (p, i) {
+        log('[' + (i + 1) + '] ' + (p.name || '') + ' ' + p.address +
+          ' gatt=' + (p.gatt ? '有' : '无') +
+          ' 属性[' + propNames(p).join('|') + ']');
+      });
+      var hit = null;
+      for (var i = 0; i < list.length; i++) {
+        if (list[i] && /CRANE|M2/i.test(list[i].name || '')) { hit = list[i]; break; }
+      }
+      if (!hit) log('★ 云台未配对：系统蓝牙设置里配对 CRANE-M2 后再按 7');
+      else if (hit.gatt) log('★ 已配对云台有 gatt！说明配对记录路线可通，重装主应用连即可');
+      else log('★ 云台已配对但仍无 gatt → 这版固件没有暴露任何 GATT 入口，需升级固件');
+    }).catch(function (e) {
+      log('✗ getPairedDevices 失败: ' + e.message);
+    });
+  }
+
   /* ---------- 按键 ---------- */
 
   root.addEventListener('keydown', function (e) {
@@ -215,6 +263,7 @@
       return;
     }
     if (k === '*') { toggleHeartbeat(); return; }
+    if (k === '7') { deepDump(); return; }
     if (k === 'Backspace') {
       e.preventDefault();
       cleanup();

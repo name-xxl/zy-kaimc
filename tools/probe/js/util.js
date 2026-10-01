@@ -48,5 +48,17 @@
     if (el) el.classList.toggle('hidden', !on);
   };
 
+  /* 锁定竖屏方向。Gecko 录像管线按窗口方向角决定写入视频的旋转，
+   * 不锁的话录出来的视频是横的（2720 实测）。 */
+  U.lockPortrait = function () {
+    try {
+      var sc = root.screen;
+      if (sc && sc.orientation && sc.orientation.lock) {
+        var p = sc.orientation.lock('portrait');
+        if (p && typeof p.catch === 'function') p.catch(function () { /* 失败不影响拍摄 */ });
+      }
+    } catch (e) { /* 不支持就跳过 */ }
+  };
+
   root.KaiUtil = U;
 })(typeof window !== 'undefined' ? window : globalThis);

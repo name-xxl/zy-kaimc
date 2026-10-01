@@ -118,34 +118,89 @@
         };
       });
     };
-    return run([]).catch(function () {
-      /* 有的固件要求至少一个 service UUID */
-      return run([FEE9_UUID]);
+    /* 先带 FEE9 过滤：扫到的设备栈已确认为 LE，记录归类正确 gatt 才不为 null；
+     * 有的固件 UUID 过滤扫不到，退回全量扫描 */
+    return run([FEE9_UUID]).catch(function () {
+      return run([]);
     });
+  };
+
+  /* 设备形状诊断串：gatt 拿不到时，用 in 探测原型链属性（WebIDL 属性不在 Object.keys 里） */
+  function describeDevice(d) {
+    var parts = [];
+    var probe = ['address', 'name', 'type', 'paired', 'uuids', 'gatt', 'fetchUuids'];
+    var has = [];
+    probe.forEach(function (k) {
+      try { if (k in d) has.push(k); } catch (e) { /* 原型链抛异常也当没有 */ }
+    });
+    parts.push('has=' + (has.join('|') || 'none'));
+    try { parts.push('type=' + d.type); } catch (e) { /* 无该属性 */ }
+    try { if (d.uuids) parts.push('uuids=' + d.uuids.length); } catch (e) { /* 无该属性 */ }
+    return parts.join(' ');
+  }
+
+  /* 配对记录兜底：系统设置里配对过的设备记录 type 正确、gatt 通常可用。
+   * 失败时把配对路径的结局也报出来（apiMissing/err/数量/noGATT/noMatch），便于真机定位 */
+  Bt.prototype.gattFromPaired = function (device, hint) {
+    var adapter = this.adapter;
+    if (!adapter || typeof adapter.getPairedDevices !== 'function') {
+      return Promise.reject(new Error('设备没有 GATT 接口(' + hint + ' paired=apiMissing)'));
+    }
+    return U.prom(adapter.getPairedDevices(), 'getPairedDevices').catch(function (e) {
+      throw new Error('设备没有 GATT 接口(' + hint + ' paired=err:' +
+        ((e && (e.message || e.name)) || 'unknown') + ')');
+    }).then(function (list) {
+      list = list || [];
+      var tag = String(list.length);
+      for (var i = 0; i < list.length; i++) {
+        var p = list[i];
+        if (!p || p.address !== device.address) continue;
+        if (p.gatt) return p.gatt;
+        tag += ' noGATT';
+      }
+      if (list.length && tag.indexOf(' ') === -1) tag += ' noMatch';
+      throw new Error('设备没有 GATT 接口(' + hint + ' paired=' + tag +
+        ')，可在系统蓝牙设置配对云台后重试');
+    });
+  };
+
+  /* 拿可用的 gatt：直取 → fetchUuids 刷新记录 → 系统配对记录。
+   * 官方文档 gatt 对 classic/unknown 类型设备返回 null，扫描记录可能尚未归类为 LE */
+  Bt.prototype.acquireGatt = function (device) {
+    var self = this;
+    if (device.gatt) return Promise.resolve(device.gatt);
+    var hint = describeDevice(device);
+    if (typeof device.fetchUuids !== 'function') return self.gattFromPaired(device, hint);
+    return U.prom(device.fetchUuids(), 'fetchUuids').catch(function () { /* 刷新失败继续兜底 */ })
+      .then(function () {
+        if (device.gatt) return device.gatt;
+        return self.gattFromPaired(device, hint);
+      });
   };
 
   /* GATT 连接 + 服务发现；resolve {gatt, services, fee9, writeChar, notifyChar} */
   Bt.prototype.connect = function (device) {
-    var gatt = device.gatt;
-    if (!gatt) return Promise.reject(new Error('设备没有 GATT 接口'));
-    return U.prom(gatt.connect(), 'gatt.connect').then(function () {
-      return U.prom(gatt.discoverServices(), 'discoverServices').catch(function () {
-        /* 有的栈 connect 后服务已就绪 */
-      });
-    }).then(function () {
-      var services = gatt.services || [];
-      var res = { gatt: gatt, services: services, fee9: null, writeChar: null, notifyChar: null };
-      services.forEach(function (s) {
-        var su = (s.uuid || '').toLowerCase();
-        if (su.indexOf('fee9') === -1) return;
-        res.fee9 = s;
-        (s.characteristics || []).forEach(function (c) {
-          var cu = (c.uuid || '').toLowerCase();
-          if (cu.indexOf('129600') !== -1) res.writeChar = c;
-          if (cu.indexOf('129601') !== -1) res.notifyChar = c;
+    var self = this;
+    return self.acquireGatt(device).then(function (gatt) {
+      return U.prom(gatt.connect(), 'gatt.connect').then(function () {
+        return U.prom(gatt.discoverServices(), 'discoverServices').catch(function () {
+          /* 有的栈 connect 后服务已就绪 */
         });
+      }).then(function () {
+        var services = gatt.services || [];
+        var res = { gatt: gatt, services: services, fee9: null, writeChar: null, notifyChar: null };
+        services.forEach(function (s) {
+          var su = (s.uuid || '').toLowerCase();
+          if (su.indexOf('fee9') === -1) return;
+          res.fee9 = s;
+          (s.characteristics || []).forEach(function (c) {
+            var cu = (c.uuid || '').toLowerCase();
+            if (cu.indexOf('129600') !== -1) res.writeChar = c;
+            if (cu.indexOf('129601') !== -1) res.notifyChar = c;
+          });
+        });
+        return res;
       });
-      return res;
     });
   };
 
