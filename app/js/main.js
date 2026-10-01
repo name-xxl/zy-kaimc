@@ -205,9 +205,9 @@
           dlog('✓ 云台就绪(心跳1s)');
           UI.hud({ ble: t('connected') });
           UI.toast(t('connected'));
-          /* 主动探测：照抄官方 App 帧形 + 握手巡检（0x02/0x04/0x06/0x68/0x24/0x22 各 3 次） */
+          /* 主动探测：照抄官方 App 帧形 + 官方初始化序列（0x02→0x04→0x05 等应答） */
           root.setTimeout(function () { sayHello(); }, 2000);
-          root.setTimeout(function () { handshakeSweep(); }, 3500);
+          root.setTimeout(function () { initSequence(); }, 3500);
         });
     }).catch(function (err) {
       dlog('✗ 云台连接失败: ' + (err && err.message));
@@ -324,28 +324,32 @@
   function askBattery() { probeOfficial(0x06, '电量查询'); }
   function sayHello() { probeOfficial(0x02, 'hello'); }
 
-  /* 握手巡检：逆向资料里官方 App 会"同一消息连发 5 次直到有应答"。
-   * 对我们怀疑的初始化/查询命令各连发 3 次，任何一次收到云台回包立刻停止 */
-  var HANDSHAKE_CMDS = [0x02, 0x04, 0x06, 0x68, 0x24, 0x22];
-  function handshakeSweep() {
+  /* 官方初始化序列（来自真机验证过的开源客户端 bleebil 的 init 代码：
+   *   awaitResponse(0x02, 000000) → awaitResponse(0x04, 000000) → awaitResponse(0x05, 000000)
+   * 每条等应答、最多重试 5 次——与"官方 App 连发 5 次才放弃"的抓包现象一致。
+   * 之后顺带试几个查询命令。任何一次收到云台回包立即停止 */
+  var INIT_SEQ = [
+    [0x02, 5], [0x04, 5], [0x05, 5],
+    [0x06, 2], [0x68, 1], [0x24, 1], [0x22, 1]
+  ];
+  function initSequence() {
     if (!state.conn) return;
-    var qi = 0, ri = 0;
-    dlog('握手巡检: ' + HANDSHAKE_CMDS.length + ' 条命令 ×3（收到回包即停）');
-    var timer = root.setInterval(function () {
-      if (!state.conn || state.rxCount > 0) {
-        root.clearInterval(timer);
-        dlog(state.rxCount > 0 ? '握手巡检停止：已收到云台数据' : '握手巡检结束：仍无任何回包');
-        return;
-      }
-      if (ri >= 3) { ri = 0; qi++; }
-      if (qi >= HANDSHAKE_CMDS.length) {
-        root.clearInterval(timer);
-        dlog('握手巡检结束：仍无任何回包');
-        return;
-      }
-      probeOfficial(HANDSHAKE_CMDS[qi], '握手 0x' + HANDSHAKE_CMDS[qi].toString(16));
-      ri++;
-    }, 400);
+    var i = 0, tries = 0;
+    dlog('初始化序列: 0x02/0x04/0x05 各等应答最多 5 次');
+    function next() {
+      if (!state.conn) return;
+      if (state.rxCount > 0) { dlog('初始化停止：已收到云台数据'); return; }
+      if (i >= INIT_SEQ.length) { dlog('初始化序列跑完：仍无任何回包'); return; }
+      var cmd = INIT_SEQ[i][0], max = INIT_SEQ[i][1];
+      tries++;
+      probeOfficial(cmd, '初始化 0x' + cmd.toString(16) + ' #' + tries);
+      root.setTimeout(function () {
+        if (state.rxCount > 0) { dlog('初始化停止：已收到云台数据'); return; }
+        if (tries >= max) { i++; tries = 0; }
+        next();
+      }, 600);
+    }
+    next();
   }
 
   /* ---------- 云台事件 ---------- */
