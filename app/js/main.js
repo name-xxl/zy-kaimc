@@ -52,7 +52,7 @@
     if (!state.debugOn) { el.textContent = ''; U.show('debug', false); return; }
     U.show('debug', true);
     var lines = cam.getLog().concat(state.appLog);
-    el.textContent = lines.slice(-12).join('\n');
+    el.textContent = lines.slice(-10).join('\n');
   }
 
   function fmtClock() {
@@ -69,6 +69,7 @@
     UI.hud({ ble: t('camInit'), mode: t('modePhoto') });
     root.addEventListener('keydown', onKey);
     root.document.addEventListener('visibilitychange', onVis);
+    probeAppIdentity();
 
     cam.init().then(function () {
       return cam.startPreview(U.byId('preview'));
@@ -84,6 +85,27 @@
       UI.hud({ ble: t('scan') });
       connectGimbal(); /* 相机失败不影响连云台 */
     });
+  }
+
+  /* App 身份与权限环境探测：确认是否 privileged、蓝牙/存储 API 是否可用 */
+  function probeAppIdentity() {
+    try {
+      var m = root.navigator.mozApps;
+      if (m && m.getSelf) {
+        var req = m.getSelf();
+        req.onsuccess = function () {
+          var a = req.result;
+          dlog('app type=' + (a && a.manifest ? a.manifest.type : '?') +
+            ' origin=' + ((a && a.installOrigin) || '?'));
+        };
+        req.onerror = function () { dlog('app getSelf 失败'); };
+      }
+    } catch (e) { /* 无 mozApps */ }
+    try {
+      var ds = root.navigator.getDeviceStorage ? root.navigator.getDeviceStorage('pictures') : null;
+      dlog('priv: storage=' + (ds ? 'ok' : 'null') +
+        ' bt=' + (root.navigator.mozBluetooth ? 'ok' : 'null'));
+    } catch (e) { /* 无 deviceStorage */ }
   }
 
   function retryCamera() {
@@ -111,9 +133,13 @@
 
   function connectGimbal() {
     bt.init().then(function () {
-      return bt.ensureEnabled();
+      dlog('BT: ' + bt.radioProbe());
+      /* 状态检测失败不阻断——直接试扫描，扫描会给出真实错误 */
+      return bt.ensureEnabled().catch(function (e) {
+        dlog('BT 开启存疑仍尝试扫描: ' + e.message);
+      });
     }).then(function () {
-      dlog('蓝牙就绪，扫描 ' + GIMBAL_NAME_RE);
+      dlog('扫描 ' + GIMBAL_NAME_RE);
       UI.hud({ ble: t('scan') });
       return waitForGimbal();
     }).then(function (dev) {

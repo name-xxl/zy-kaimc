@@ -43,29 +43,58 @@
     });
   };
 
+  /* 原始蓝牙状态（调试面板显示用） */
+  Bt.prototype.radioProbe = function () {
+    var a = this.adapter;
+    var en = '?', st = '?';
+    try { en = a.enabled; } catch (e) { en = '抛异常'; }
+    try { st = a.state; } catch (e) { st = '抛异常'; }
+    return 'enabled=' + en + ' state=' + st;
+  };
+
+  /* 是否已开启。优先读 B2G 标准的 enabled 布尔；都读不到时乐观放行，
+   * 让后续 startLeScan 给出真实错误，而不是在这里瞎等 */
+  Bt.prototype.isEnabled = function () {
+    var a = this.adapter;
+    var en;
+    try { en = a.enabled; } catch (e) { en = undefined; }
+    if (typeof en === 'boolean') return en;
+    var st;
+    try { st = a.state; } catch (e) { st = undefined; }
+    if (st) return (st === 'enabled' || st === 'on');
+    return true;
+  };
+
   Bt.prototype.ensureEnabled = function () {
+    var self = this;
     var adapter = this.adapter;
-    var isEnabled = function () {
-      return adapter.state ? (adapter.state === 'enabled') : !!adapter.enabled;
-    };
-    if (isEnabled()) return Promise.resolve(true);
+    if (self.isEnabled()) return Promise.resolve(true);
     return new Promise(function (resolve, reject) {
       var settled = false;
-      var onAttr = function () {
-        if (!settled && isEnabled()) {
-          settled = true;
-          try { adapter.removeEventListener('attributechanged', onAttr); } catch (e) {}
-          resolve(true);
-        }
+      var finish = function (err) {
+        if (settled) return;
+        settled = true;
+        root.clearInterval(poll);
+        try { adapter.removeEventListener('attributechanged', onAttr); } catch (e) { /* 已移除 */ }
+        if (err) reject(err); else resolve(true);
       };
-      try { adapter.addEventListener('attributechanged', onAttr); } catch (e) {}
+      var onAttr = function () { /* 由 poll 统一判定状态 */ };
+      try { adapter.addEventListener('attributechanged', onAttr); } catch (e) { /* 无事件 */ }
+      var poll = root.setInterval(function () {
+        if (self.isEnabled()) finish(null);
+      }, 500);
       try {
         var p = adapter.enable();
-        if (p && typeof p.catch === 'function') p.catch(function () {});
-        else if (p && 'onsuccess' in p) { p.onerror = function () {}; }
+        if (p && typeof p.catch === 'function') {
+          p.catch(function (e) {
+            finish(new Error('蓝牙 enable() 被拒: ' + ((e && (e.message || e.name)) || e)));
+          });
+        } else if (p && 'onsuccess' in p) {
+          p.onerror = function () { finish(new Error('蓝牙 enable() 被拒（请在系统设置手动打开）')); };
+        }
       } catch (e) { /* 有的固件无 enable()，只能等系统开关 */ }
       root.setTimeout(function () {
-        if (!settled) { settled = true; reject(new Error('蓝牙开启超时（请在系统设置手动打开）')); }
+        finish(new Error('蓝牙开启超时(' + self.radioProbe() + ')，请在系统设置打开蓝牙'));
       }, 12000);
     });
   };
