@@ -18,6 +18,11 @@
 | App→云台（writeWithoutResponse） | `d44bc439-abfd-45a2-b575-925416129600` |
 | 云台→App（notify） | `d44bc439-abfd-45a2-b575-925416129601` |
 
+Android nRF Connect 实测（2026-10-01，CRANE-M2_AB53 / c4:4f:33:7c:ab:53，未配对直连）：
+- 129600：**Properties: WRITE NO RESPONSE**（无 READ/NOTIFY）
+- 129601：**Properties: NOTIFY**，含 **CCCD 描述符 0x2902**（即我们手动写 `0x2902=0x0001` 是正确使能值；该特征无 READ，轮询读值不可能）
+- 服务表共 3 个：`0x1800`（GAP）、`0x1801`（GATT）、`0xFEE9`
+
 ### 帧格式
 ```
 24 <DIR> <LEN:2B 小端> <FMT:2B> <SEQ:2B 大端> <TYPE> <CMD> <PAYLOAD…> <CRC16:2B 小端>
