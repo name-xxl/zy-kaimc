@@ -15,7 +15,7 @@
   /* 本文件只做编排：相机 + UI/键位 + 云台会话(KaiSession) + 按键分发(KaiButtons)。
    * 键码与时序常量见 config.js（AppCfg.KEY / AppCfg.*_MS） */
 
-  var APP_VERSION = 'v7.4';
+  var APP_VERSION = 'v7.5';
   var GIMBAL_NAME_RE = /CRANE[-_ ]?M2/i;
 
   var state = {
@@ -333,17 +333,15 @@
     }
     if (!f.crcOk) return;
 
-    /* 电量应答（cmd 0x06）：args = 00 <lo> <hi>；数值随电量下降，疑似 "mV-3000"（待与云台 OLED 校准） */
+    /* 电量应答（cmd 0x06）：args = 00 <lo> <hi>，值是电池组电压×10mV（见 config.BATT_CELL_CURVE） */
     if (f.cmd === 0x06 && f.payload.length >= 3) {
       var raw = f.payload[1] | (f.payload[2] << 8);
       if (raw !== state.gimbalBattRaw) {
         state.gimbalBattRaw = raw;
-        var pct = Math.round((raw - 300) / 9);   /* 1S 锂电线性模型：4.2V=100% / 3.3V=0% */
-        dlog('电量 raw=' + raw + ' ≈ ' + pct + '%');
-        if (pct >= 0 && pct <= 100) {
-          state.gimbalBatt = pct;
-          renderHudBle();
-        }
+        var pct = battPct(raw);
+        dlog('电量 ' + (raw / 100).toFixed(2) + 'V ≈ ' + pct + '%');
+        state.gimbalBatt = pct;
+        renderHudBle();
       }
     }
 
@@ -356,11 +354,8 @@
       }
     }
 
-    /* 心跳帧（0x1815）：payload 首字节常为电量百分比（旧口径，保留） */
-    if (f.cmd === 0x80 && f.payload.length >= 1 && f.payload[0] <= 100 && state.gimbalBattRaw === null) {
-      state.gimbalBatt = f.payload[0];
-      renderHudBle();
-    }
+    /* 心跳帧（0x1815）：payload 首字节旧口径当过"电量百分比"，但样例 0x50=80 与 0x06 电压口径
+     * 对不上（0x06 才是权威电量），已弃用，避免污染电量显示 */
   }
 
   function onGimbalButton(f) {
@@ -535,6 +530,22 @@
       param: parts.join(' · '),
       zoom: ((state.zoomRatios.length > 1 ? ('×' + state.zoomRatios[state.zoomIdx]) : '') + ' ' + APP_VERSION).trim()
     });
+  }
+
+  /* 电量换算：raw = 电池组电压×10mV（3S 18650）→ 单节电压查放电曲线得剩余百分比 */
+  function battPct(raw) {
+    var curve = AppCfg.BATT_CELL_CURVE;
+    if (!curve || !curve.length) return 0;
+    var mv = raw * 10 / 3;                     /* 单节电压（mV） */
+    if (mv >= curve[0][0]) return curve[0][1];
+    for (var i = 1; i < curve.length; i++) {
+      if (mv >= curve[i][0]) {
+        var hi = curve[i - 1], lo = curve[i];
+        var k = (mv - lo[0]) / (hi[0] - lo[0]);
+        return Math.round(lo[1] + k * (hi[1] - lo[1]));
+      }
+    }
+    return 0;
   }
 
   /* 顶部状态行：连接状态文本 +（连上且已知时）云台电量，如「云台已连接 85%」 */
