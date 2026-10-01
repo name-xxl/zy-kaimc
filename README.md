@@ -29,8 +29,9 @@ node scripts/build.js          # 语法 + 协议自测 + 同步共享 JS + 打�
 node scripts/test-session.js   # 会话层仿真回归（假适配器，不碰真机）
 ```
 
-自动完成：全部 JS 语法检查、manifest 校验、协议自测（含 ZY Play 抓包回归）、共享 JS 同步到探针、
-版本一致性自检（HUD 版本 ↔ manifest 版本）、打包。无任何 npm 依赖。
+自动完成：全部 JS 语法检查、manifest 校验、协议自测（含 ZY Play 抓包回归）、**悬空成员检查**
+（模块导出的成员 vs 全仓成员访问，专防"函数被删、调用还在"这类回归——`U.withTimeout` 事件就是它没在）
+、共享 JS 同步到探针、版本一致性自检（HUD 版本 ↔ manifest 版本）、打包。无任何 npm 依赖。
 
 产物：`dist/zy-kaimc-<版本>.zip`（**交付件**）＋ `dist/zy-kaimc.zip`（最新副本，供脚本/文档引用）；
 探针同理 `zy-probe-<版本>.zip` / `zy-probe.zip`。

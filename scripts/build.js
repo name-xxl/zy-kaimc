@@ -44,6 +44,60 @@ function listJs(dir) {
   }
 });
 
+/* 2b) 悬空成员检查：模块导出的成员 vs 全仓库的成员访问
+ * （专治"函数被删、调用还在"——历史上 U.withTimeout 被误删导致相机卡启动中） */
+(function danglingMembers() {
+  const readSrc = (rel) => fs.readFileSync(path.join(rootDir, rel), 'utf8');
+  const strip = (s) => s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
+  function namesOf(re, src) {
+    const out = new Set();
+    let m;
+    while ((m = re.exec(src)) !== null) out.add(m[1]);
+    return out;
+  }
+  const utilSrc = readSrc('app/js/util.js');
+  const bleSrc = readSrc('app/js/ble.js');
+  const uiSrc = readSrc('app/js/ui.js');
+  const btnSrc = readSrc('app/js/buttons.js');
+  const sessSrc = readSrc('app/js/session.js');
+  const camSrc = readSrc('app/js/camera.js');
+  const cfgSrc = readSrc('app/js/config.js');
+  const zSrc = readSrc('app/js/zhiyun.js');
+  const cfgBody = (/var C = \{([\s\S]*?)\n  \};/.exec(cfgSrc) || ['', ''])[1];
+  const zExport = (/root\.Zhiyun = \{([\s\S]*?)\n  \};/.exec(zSrc) || ['', ''])[1];
+  const known = {
+    U: namesOf(/U\.([\w$]+)\s*=/g, utilSrc),
+    UI: namesOf(/UI\.([\w$]+)\s*=/g, uiSrc),
+    Buttons: namesOf(/B\.([\w$]+)\s*=/g, btnSrc),
+    AppCfg: namesOf(/([\w$]+)\s*:/g, cfgBody),
+    Session: new Set([...namesOf(/Session\.prototype\.([\w$]+)\s*=/g, sessSrc), ...namesOf(/this\.([\w$]+)\s*=/g, sessSrc)]),
+    bt: new Set([...namesOf(/Bt\.prototype\.([\w$]+)\s*=/g, bleSrc), ...namesOf(/this\.([\w$]+)\s*=/g, bleSrc)]),
+    Z: namesOf(/([\w$]+)\s*:/g, zExport),
+    cam: new Set([...namesOf(/Cam\.prototype\.([\w$]+)\s*=/g, camSrc), ...namesOf(/this\.([\w$]+)\s*=/g, camSrc)])
+  };
+  const reUse = /\b(U|UI|Buttons|AppCfg|Session|bt|Z|cam)\.([A-Za-z_$][\w$]*)/g;
+  const bad = [];
+  [...listJs(path.join(rootDir, 'app/js')), ...listJs(path.join(rootDir, 'tools/probe/js'))].forEach((f) => {
+    const raw = fs.readFileSync(f, 'utf8');
+    const src = strip(raw);
+    let m;
+    reUse.lastIndex = 0;
+    while ((m = reUse.exec(src)) !== null) {
+      const alias = m[1];
+      const name = m[2];
+      if (name === 'prototype') continue;   /* 定义行本身（Session.prototype.x = …） */
+      const tail = src.slice(m.index + m[0].length);
+      if (/^\s*(=[^=]|:)/.test(tail)) continue;  /* 赋值/键值：是定义不是访问 */
+      if (known[alias] && known[alias].has(name)) continue;
+      const line = raw.slice(0, raw.indexOf(src.slice(m.index, m.index + 1)) >= 0 ? m.index : 0).split('\n').length;
+      bad.push(path.relative(rootDir, f) + ':' + line + '  ' + alias + '.' + name);
+    }
+  });
+  const uniq = [...new Set(bad)];
+  check(uniq.length === 0, '悬空成员检查（各模块成员访问均有定义）' +
+    (uniq.length ? '：\n    ' + uniq.slice(0, 12).join('\n    ') : ''));
+})();
+
 /* 3) 协议自测 */
 try {
   const Z = require(path.join(rootDir, 'app/js/zhiyun.js'));
