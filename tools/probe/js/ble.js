@@ -8,8 +8,6 @@
 
   function Bt() { this.adapter = null; }
 
-  Bt.prototype.available = function () { return !!root.navigator.mozBluetooth; };
-
   /* 获取适配器：KaiOS 上 defaultAdapter 属性可能延迟出现，属性/DOMRequest/事件三路兜底 */
   Bt.prototype.init = function () {
     var self = this;
@@ -160,7 +158,7 @@
       }
       if (list.length && tag.indexOf(' ') === -1) tag += ' noMatch';
       throw new Error('设备没有 GATT 接口(' + hint + ' paired=' + tag +
-        ')。云台是 BLE-only，系统设置搜不到，用探针按 8 程序配对后重试');
+        ')。云台是 BLE-only、系统设置搜不到属正常；确认扫描走 FEE9 过滤、云台未被其它 App 占用。**不需要配对，勿调用 pair()**（本固件会挂起等 PIN）');
     });
   };
 
@@ -250,8 +248,10 @@
     });
   };
 
-  /* 尽力打开通知。KaiOS 实机可能不派发事件（kaios.dev 实测），调用方必须做 readValue 轮询兜底。
-   * resolve 通知状态 info：{props, desc, cccd, wrote, startErr?}（不再 reject，交给调用方展示） */
+  /* 武装接收：写 CCCD 建立订阅（这一步是必须的），并挂事件监听仅为兼容——
+   * 2026-10-01 真机实测：本固件通知进栈、`.value` 会更新，但 oncharacteristicchanged
+   * / addEventListener 永不触发；**接收必须由调用方轮询特征对象的 `.value`**（本地缓存读）。
+   * resolve 通知状态 info：{props, descs, cccd, wrote, note, startErr?}（不 reject） */
   Bt.prototype.armNotifications = function (con, onValue) {
     var self = this;
     var gatt = con.gatt;

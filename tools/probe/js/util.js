@@ -31,13 +31,6 @@
     return s.join(' ') + (u8.length > n ? ' …(' + u8.length + 'B)' : '');
   };
 
-  /* 给 Promise 加超时（DOMRequest 可能永久挂起，如权限弹窗未应答） */
-  U.withTimeout = function (p, ms, label) {
-    return Promise.race([p, new Promise(function (_, reject) {
-      root.setTimeout(function () { reject(new Error((label || '操作') + ' 超时(' + ms + 'ms)')); }, ms);
-    })]);
-  };
-
   U.byId = function (id) { return root.document.getElementById(id); };
   U.setText = function (id, text) {
     var el = U.byId(id);

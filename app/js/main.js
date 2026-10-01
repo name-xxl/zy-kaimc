@@ -295,8 +295,8 @@
     return true;
   }
 
-  /* 官方帧形探测（见 Zhiyun.buildOfficialFrame）：照抄官方 App 的 app→gimbal 帧形与参数长度。
-   * 我们的旧帧形（16 位序号 + TYPE）可能不被云台接受，这里是关键对照实验 */
+  /* 诊断帧发送：按官方帧形发一条命令（参数固定 3 字节 0x000000）。
+   * 正式初始化序列见 OFFICIAL_INIT；这里的命令只服务调试键位（0/5） */
   function probeOfficial(cmd, tag) { sendCmd(cmd, [0x00, 0x00, 0x00], tag); }
 
   function sendCmd(cmd, args, tag) {
@@ -332,7 +332,8 @@
   }
 
   function askBattery() { probeOfficial(0x06, '电量查询'); }
-  function sayHello() { probeOfficial(0x02, 'hello'); }
+  /* 0x02 是历史资料里的探测帧，**不是**官方初始化序列的一部分（官方首个命令是 0x04） */
+  function sayHello() { probeOfficial(0x02, '0x02 探测帧'); }
 
   /* 官方初始化序列 —— 2026-10-01 ZY Play 抓包实锤（logs/zyplay-cap1.txt）：
    *   0x04 连发最多 3 次直到云台应答 → 读序列号 0x7C/0x7D/0x7E/0x7F →
