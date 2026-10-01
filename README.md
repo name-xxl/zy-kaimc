@@ -1,7 +1,7 @@
 # ZY-KaiCam — 用智云云鹤 M2 的按键控制 KaiOS 相机
 
 Nokia 2720 Flip（KaiOS 2.5，旧固件 build 22-）上的 privileged 应用：通过 BLE 连接智云云鹤 M2 云台，
-把云台按键映射为手机相机的快门/录像，并提供键盘可调的相机参数（ISO/白平衡/曝光补偿等，按 HAL 实际能力生成）。
+把云台按键映射为手机相机的快门/录像，并提供键盘可调的相机参数（ISO/白平衡/曝光补偿等，按 HAL 实际能力生成，取值显示中文）。
 
 ## 目录
 
@@ -20,7 +20,7 @@ dist/           构建产物 zy-kaimc.zip / zy-probe.zip
    连上 `CRANE-M2-XXXX`，依次按云台各按键，把屏幕上的 `[IN]` 字节行记录到 [docs/protocol.md](docs/protocol.md)。
    这一步同时回答三件事：M2 是否用 fee9 特征对、通知能否触发（还是要轮询）、各按键的命令字节。
 3. 再装主应用（WebIDE 选 `app/manifest.webapp`，或 `dist/zy-kaimc.zip`）。
-   若探针测出的按键字节与默认映射不同，改 `app/js/main.js` 里的 `BUTTON_MAP` 后重装。
+   若探针测出的按键字节与默认映射不同，改 `app/js/config.js` 的 `AppCfg.KEY` 后重装。
 
 ## 构建
 
