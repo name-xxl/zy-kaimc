@@ -62,7 +62,7 @@ html, body {
   word-break: break-all;
 }
 
-/* 构图辅助线（九宫格）：四条 1px 白线，压在取景画面上 */
+/* 构图辅助线：竖/横 1px 白线（JS 按模式放置），对角线用渐变画（自动随宽高比） */
 #grid-overlay {
   position: absolute; top: 0; left: 0; right: 0; bottom: 0;
   pointer-events: none;
@@ -74,6 +74,19 @@ html, body {
 #grid-overlay .gh {
   position: absolute; left: 0; right: 0; height: 1px;
   background: rgba(255, 255, 255, 0.5);
+}
+#grid-overlay .gdiag1, #grid-overlay .gdiag2 {
+  position: absolute; top: 0; left: 0; right: 0; bottom: 0;
+}
+#grid-overlay .gdiag1 {
+  background: linear-gradient(to top right,
+    transparent calc(50% - 1px), rgba(255,255,255,0.45) calc(50% - 1px),
+    rgba(255,255,255,0.45) calc(50% + 0px), transparent calc(50% + 0px));
+}
+#grid-overlay .gdiag2 {
+  background: linear-gradient(to bottom right,
+    transparent calc(50% - 1px), rgba(255,255,255,0.45) calc(50% - 1px),
+    rgba(255,255,255,0.45) calc(50% + 0px), transparent calc(50% + 0px));
 }
 
 #flash-overlay {

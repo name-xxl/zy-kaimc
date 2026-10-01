@@ -15,7 +15,7 @@
   /* 本文件只做编排：相机 + UI/键位 + 云台会话(KaiSession) + 按键分发(KaiButtons)。
    * 键码与时序常量见 config.js（AppCfg.KEY / AppCfg.*_MS） */
 
-  var APP_VERSION = 'v8.2';
+  var APP_VERSION = 'v8.3';
   var GIMBAL_NAME_RE = /CRANE[-_ ]?M2/i;
 
   var state = {
@@ -644,26 +644,55 @@
     return (n > 0 ? '+' : '') + s;
   }
 
-  /* ---------- 构图辅助线（九宫格，* 键或参数菜单切换，设置持久化） ---------- */
+  /* ---------- 构图辅助线（* 键或参数菜单循环：关/九宫格/黄金分割/中心十字/对角线；设置持久化） ---------- */
 
   var GRID_KEY = 'zyGrid';
+  var GRID_MODES = ['off', 'thirds', 'golden', 'cross', 'diag'];
+  var GRID_LABELS = {
+    off: 'gridOff', thirds: 'gridThirds', golden: 'gridGolden', cross: 'gridCross', diag: 'gridDiag'
+  };
 
   function loadGrid() {
-    try { return root.localStorage && root.localStorage.getItem(GRID_KEY) === '1'; } catch (e) { return false; }
+    try {
+      var v = root.localStorage && root.localStorage.getItem(GRID_KEY);
+      if (v === '1' || v === 'true') return 'thirds';        /* v8.2 的布尔值 */
+      return (GRID_MODES.indexOf(v) >= 0) ? v : 'off';
+    } catch (e) { return 'off'; }
   }
+
+  function gridText() { return t(GRID_LABELS[state.grid] || 'gridOff'); }
 
   function applyGrid() {
-    U.show('grid-overlay', !!state.grid);
+    var el = U.byId('grid-overlay');
+    if (!el) return;
+    var mode = state.grid;
+    el.textContent = '';
+    if (mode === 'off') { U.show('grid-overlay', false); return; }
+    var mk = function (cls, style) {
+      var d = root.document.createElement('div');
+      d.className = cls;
+      if (style) d.setAttribute('style', style);
+      el.appendChild(d);
+    };
+    if (mode === 'diag') {
+      mk('gdiag1'); mk('gdiag2');
+    } else {
+      var at = (mode === 'cross') ? [50] : (mode === 'golden' ? [38.2, 61.8] : [33.333, 66.667]);
+      at.forEach(function (p) {
+        mk('gv', 'left:' + p + '%');
+        mk('gh', 'top:' + p + '%');
+      });
+    }
+    U.show('grid-overlay', true);
   }
 
-  function toggleGrid(silent) {
-    state.grid = !state.grid;
-    try { root.localStorage.setItem(GRID_KEY, state.grid ? '1' : '0'); } catch (e) { /* 无存储 */ }
+  /* 切到下一种辅助线：视觉变化本身够明显，不弹提示 */
+  function toggleGrid() {
+    var i = GRID_MODES.indexOf(state.grid);
+    state.grid = GRID_MODES[(i + 1) % GRID_MODES.length];
+    try { root.localStorage.setItem(GRID_KEY, state.grid); } catch (e) { /* 无存储 */ }
     applyGrid();
-    if (!silent) UI.toast(t('grid') + ' ' + (state.grid ? t('gridOn') : t('gridOff')), 1200);
   }
-
-  function gridText() { return state.grid ? t('gridOn') : t('gridOff'); }
 
   /* ---------- 参数菜单 ---------- */
 
@@ -740,12 +769,12 @@
       items.push(ecItem);
     }
     if (!items.length) items.push({ label: t('noParams'), valueText: '' });
-    /* 构图辅助线（←→ 切换）与关于（中键/→ 进入二级页） */
+    /* 构图辅助线（←→ 循环）与关于（中键/→ 进入二级页） */
     items.push({
       label: t('grid'),
       valueText: gridText(),
       cycle: function () {
-        toggleGrid(true);
+        toggleGrid();
         this.valueText = gridText();
         UI.refreshMenu();
       }

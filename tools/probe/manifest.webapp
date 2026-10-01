@@ -3,7 +3,7 @@
   "short_name": "ZY-Probe",
   "description": "智云云台 BLE 协议探针：枚举 GATT、监听按键原始字节",
   "type": "privileged",
-  "version": "8.2",
+  "version": "8.3",
   "launch_path": "/index.html",
   "fullscreen": true,
   "icons": {
