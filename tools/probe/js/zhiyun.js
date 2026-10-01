@@ -1,14 +1,15 @@
 /* 智云(Zhiyun)云台 BLE 私有协议层。
  *
  * 帧格式（依据 Weebill-S / Crane 2S 逆向资料，云鹤 M2 待探针实测确认）：
- *   0x24 <DIR> <LEN:2B 大端> <FMT:2B> <SEQ:2B 大端> <TYPE> <CMD> <PAYLOAD…> <CRC16:2B 大端>
+ *   0x24 <DIR> <LEN:2B 小端> <FMT:2B> <SEQ:2B 大端> <TYPE> <CMD> <PAYLOAD…> <CRC16:2B 小端>
  *
  *   DIR  0x3C = App→云台；0x3E = 云台→App
  *   FMT  0x1812 普通命令帧；0x1815 心跳帧
  *   TYPE 0x01 命令；0x10 响应
- *   LEN  从 FMT 字节起至 PAYLOAD 末尾的字节数（不含 4 字节帧头，不含 CRC）
+ *   LEN  从 FMT 字节起至 PAYLOAD 末尾的字节数（不含 4 字节帧头，不含 CRC）；**小端**：
+ *        实测抓包为 24 3C 08 00 …（App 帧）与 24 3E 0C 00 …（云台心跳），曾按大端理解，已纠正
  *   CRC  CRC16/XMODEM（init 0x0000，poly 0x1021，MSB first），对 FMT..PAYLOAD 计算，
- *        按小端存放（低字节在前；由 Weebill-S 实测心跳帧 24 3E 00 0C 18 15 08 00 01 80
+ *        按小端存放（低字节在前；由 Weebill-S 实测心跳帧 24 3E 0C 00 18 15 08 00 01 80
  *        50 10 C2 01 00 00 98 4B 验证：CRC=0x4B98，帧内为 98 4B）。
  *        解析端兼容另一口径（从 LEN 起算），任一匹配即视为 CRC 通过。
  *
@@ -53,8 +54,8 @@
     var out = new Uint8Array(total);
     out[0] = 0x24;
     out[1] = dir & 0xFF;
-    out[2] = (bodyLen >> 8) & 0xFF;
-    out[3] = bodyLen & 0xFF;
+    out[2] = bodyLen & 0xFF;                       /* LEN 小端：实测帧 24 3C 08 00 / 24 3E 0C 00 */
+    out[3] = (bodyLen >> 8) & 0xFF;
     out[4] = (format >> 8) & 0xFF;
     out[5] = format & 0xFF;
     out[6] = (seq >> 8) & 0xFF;
@@ -88,18 +89,36 @@
         i++; keepFrom = i; continue;
       }
       if (i + 4 > n) break;
-      var bodyLen = (this.buf[i + 2] << 8) | this.buf[i + 3];
-      if (bodyLen < 6 || bodyLen > Parser.MAX_BODY) { i++; keepFrom = i; continue; }
-      var total = 4 + bodyLen + 2;
+      /* LEN 实测为小端（24 3C 08 00 / 24 3E 0C 00）；兼容历史上按大端理解的数据，两者都试 */
+      var leLen = this.buf[i + 2] | (this.buf[i + 3] << 8);
+      var beLen = (this.buf[i + 2] << 8) | this.buf[i + 3];
+      var cand = null, alt = null;
+      if (leLen >= 6 && leLen <= Parser.MAX_BODY) {
+        cand = leLen;
+        if (beLen >= 6 && beLen <= Parser.MAX_BODY) alt = beLen;
+      } else if (beLen >= 6 && beLen <= Parser.MAX_BODY) {
+        cand = beLen;
+      }
+      if (cand === null) { i++; keepFrom = i; continue; }
+      var total = 4 + cand + 2;
       if (i + total > n) break;
       var f = this.buf.subarray(i, i + total);
-      var endPayload = 4 + bodyLen;
+      var endPayload = 4 + cand;
       var crcGot = f[endPayload] | (f[endPayload + 1] << 8); /* 小端 */
       var okA = crc16(f, 4, endPayload) === crcGot;  /* FMT..PAYLOAD（实测口径） */
       var okB = crc16(f, 2, endPayload) === crcGot;  /* LEN..PAYLOAD（兼容口径） */
+      if (!okA && !okB && alt !== null && i + 4 + alt + 2 <= n) {
+        /* 小端候选 CRC 不过，试大端候选 */
+        var f2 = this.buf.subarray(i, i + 4 + alt + 2);
+        var end2 = 4 + alt;
+        var crc2 = f2[end2] | (f2[end2 + 1] << 8);
+        if (crc16(f2, 4, end2) === crc2 || crc16(f2, 2, end2) === crc2) {
+          cand = alt; f = f2; endPayload = end2; okA = true;
+        }
+      }
       frames.push({
         dir: f[1],
-        len: bodyLen,
+        len: cand,
         format: (f[4] << 8) | f[5],
         seq: (f[6] << 8) | f[7],
         type: f[8],
@@ -108,7 +127,7 @@
         raw: new Uint8Array(f),
         crcOk: okA || okB
       });
-      i += total;
+      i += 4 + cand + 2;
       keepFrom = i;
     }
     if (keepFrom > 0) this.buf = new Uint8Array(this.buf.subarray(keepFrom));
@@ -127,8 +146,8 @@
     var out = new Uint8Array(4 + body + 2);
     out[0] = 0x24;
     out[1] = DIR_APP2G;
-    out[2] = (body >> 8) & 0xFF;
-    out[3] = body & 0xFF;
+    out[2] = body & 0xFF;                       /* LEN 小端（同实测抓包 24 3C 08 00） */
+    out[3] = (body >> 8) & 0xFF;
     out[4] = 0x18;
     out[5] = 0x12;
     out[6] = officialInc;
@@ -140,7 +159,6 @@
     out[10 + data.length] = (crc >> 8) & 0xFF;
     return out;
   }
-
   /* 会话层：发命令、心跳保活、帧/按键事件分发（含重复包去重） */
   function Client(writeFn, opts) {
     opts = opts || {};

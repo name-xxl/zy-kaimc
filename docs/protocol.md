@@ -20,15 +20,24 @@
 
 ### 帧格式
 ```
-24 <DIR> <LEN:2B 大端> <FMT:2B> <SEQ:2B 大端> <TYPE> <CMD> <PAYLOAD…> <CRC16:2B 小端>
+24 <DIR> <LEN:2B 小端> <FMT:2B> <SEQ:2B 大端> <TYPE> <CMD> <PAYLOAD…> <CRC16:2B 小端>
 DIR  3C=App→云台  3E=云台→App
 FMT  1812=普通命令  1815=心跳
 TYPE 01=命令  10=响应
-LEN  从 FMT 字节起到 PAYLOAD 末尾的字节数（不含 4 字节头、不含 CRC）
+LEN  从 FMT 字节起到 PAYLOAD 末尾的字节数（不含 4 字节头、不含 CRC）；**小端存放**
 CRC  CRC16/XMODEM（init 0x0000，poly 0x1021），对 FMT..PAYLOAD 计算，小端存放（低字节在前）
 ```
-实测样例（Weebill-S 心跳，已通过本地自测）：`24 3E 00 0C 18 15 08 00 01 80 50 10 C2 01 00 00 98 4B`
-（CRC 计算值 0x4B98，帧内存为 `98 4B`）
+实测样例（Weebill-S 心跳）：`24 3E 0C 00 18 15 08 00 01 80 50 10 C2 01 00 00 98 4B`（CRC=0x4B98，帧内存 98 4B）
+
+> ⚠ **2026-10-01 修正**：此前本文件把 LEN 写成"大端"（样例记为 `24 3E 00 0C …`），是早期转录错误。
+> 依据：petermaguire.xyz 抓包原串 `243e0c001815…`、官方 App 帧 `243c 0800 1812 01 01 02 000000 6f76`、
+> bleebil 客户端硬编码 `MAGIC=[24,3c,08,00,18,12]` —— LEN 为**小端**。builder 已改小端，
+> Parser 两种都接受（兼容旧数据）。**在这之前 App 发出的所有帧 LEN 都是字节序错的，云台很可能整包丢弃**。
+
+### 官方 App（App→云台）实测帧形
+bleebil（作者用真机验证过）的构造：`24 3C <LEN:2B 小端> 18 12 <inc:1B> 01 <cmd> <data(3B)> <CRC16 小端>`，
+首帧样例 `24 3C 08 00 18 12 01 01 02 00 00 00 6F 76`（inc=1，cmd=0x02，参数 `00 00 00`）。
+本仓库 `Zhiyun.buildOfficialFrame(cmd, data)` 按此形构造；主应用连接后自动发 0x02 / 0x06 各一次做对照实验。
 
 ### 已知命令
 | CMD | 含义 | 备注 |
