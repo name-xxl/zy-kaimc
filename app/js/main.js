@@ -205,12 +205,9 @@
           dlog('✓ 云台就绪(心跳1s)');
           UI.hud({ ble: t('connected') });
           UI.toast(t('connected'));
-          /* 主动探测：照抄官方 App 帧形各发一次（0x02 首帧 / 0x06 电量），有应答会出现在 [IN#] 行 */
+          /* 主动探测：照抄官方 App 帧形 + 握手巡检（0x02/0x04/0x06/0x68/0x24/0x22 各 3 次） */
           root.setTimeout(function () { sayHello(); }, 2000);
-          root.setTimeout(function () { askBattery(); }, 3500);
-          root.setTimeout(function () {
-            if (state.rxCount === 0) dlog('7s 无云台数据（对照 docs/protocol.md 待验证项）');
-          }, 7000);
+          root.setTimeout(function () { handshakeSweep(); }, 3500);
         });
     }).catch(function (err) {
       dlog('✗ 云台连接失败: ' + (err && err.message));
@@ -326,6 +323,30 @@
 
   function askBattery() { probeOfficial(0x06, '电量查询'); }
   function sayHello() { probeOfficial(0x02, 'hello'); }
+
+  /* 握手巡检：逆向资料里官方 App 会"同一消息连发 5 次直到有应答"。
+   * 对我们怀疑的初始化/查询命令各连发 3 次，任何一次收到云台回包立刻停止 */
+  var HANDSHAKE_CMDS = [0x02, 0x04, 0x06, 0x68, 0x24, 0x22];
+  function handshakeSweep() {
+    if (!state.conn) return;
+    var qi = 0, ri = 0;
+    dlog('握手巡检: ' + HANDSHAKE_CMDS.length + ' 条命令 ×3（收到回包即停）');
+    var timer = root.setInterval(function () {
+      if (!state.conn || state.rxCount > 0) {
+        root.clearInterval(timer);
+        dlog(state.rxCount > 0 ? '握手巡检停止：已收到云台数据' : '握手巡检结束：仍无任何回包');
+        return;
+      }
+      if (ri >= 3) { ri = 0; qi++; }
+      if (qi >= HANDSHAKE_CMDS.length) {
+        root.clearInterval(timer);
+        dlog('握手巡检结束：仍无任何回包');
+        return;
+      }
+      probeOfficial(HANDSHAKE_CMDS[qi], '握手 0x' + HANDSHAKE_CMDS[qi].toString(16));
+      ri++;
+    }, 400);
+  }
 
   /* ---------- 云台事件 ---------- */
 
