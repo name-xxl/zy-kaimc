@@ -1,11 +1,13 @@
 /* 智云(Zhiyun)云台 BLE 私有协议层。
  *
  * 帧格式（依据 Weebill-S / Crane 2S 逆向资料，云鹤 M2 待探针实测确认）：
- *   0x24 <DIR> <LEN:2B 小端> <FMT:2B> <SEQ:2B 大端> <TYPE> <CMD> <PAYLOAD…> <CRC16:2B 小端>
+ *   0x24 <DIR> <LEN:2B 小端> <FMT:2B> <inc:1B> <flag:1B> <CMD:1B> <ARGS…> <CRC16:2B 小端>   （0x1812 命令帧）
  *
- *   DIR  0x3C = App→云台；0x3E = 云台→App
- *   FMT  0x1812 普通命令帧；0x1815 心跳帧
- *   TYPE 0x01 命令；0x10 响应
+ *   DIR  0x3C = App→云台；0x3E = 云台→App（注意：云台的"按键上报"帧 dir 仍是 0x3C！）
+ *   FMT  0x1812 命令帧；0x1815 心跳帧；0x1818 会话固定帧（App 发 24 3C 05 00 18 18 09 00 01 A3 16）
+ *   flag 0x01 = App 请求；0x10 = 云台应答/按键上报
+ *   inc  命令计数，应答原样带回
+ *   CMD  0x02/0x04 版本、0x06 电量、0x20 按键、0x7C-0x7F 序列号（2026-10-01 ZY Play 抓包实锤）
  *   LEN  从 FMT 字节起至 PAYLOAD 末尾的字节数（不含 4 字节帧头，不含 CRC）；**小端**：
  *        实测抓包为 24 3C 08 00 …（App 帧）与 24 3E 0C 00 …（云台心跳），曾按大端理解，已纠正
  *   CRC  CRC16/XMODEM（init 0x0000，poly 0x1021，MSB first），对 FMT..PAYLOAD 计算，
@@ -121,9 +123,11 @@
         len: cand,
         format: (f[4] << 8) | f[5],
         seq: (f[6] << 8) | f[7],
-        type: f[8],
-        cmd: f[9],
-        payload: new Uint8Array(f.subarray(10, endPayload)),
+        /* 2026-10-01 官方 App 抓包实锤：0x1812 帧的字段是 inc(6) flag(7) cmd(8) args(9..)
+         * （App 请求 flag=01；云台应答/按键上报 flag=10）；心跳 0x1815 保持旧口径 */
+        type: ((f[4] << 8) | f[5]) === FMT_CMD ? f[7] : f[8],
+        cmd: ((f[4] << 8) | f[5]) === FMT_CMD ? f[8] : f[9],
+        payload: new Uint8Array(f.subarray(((f[4] << 8) | f[5]) === FMT_CMD ? 9 : 10, endPayload)),
         raw: new Uint8Array(f),
         crcOk: okA || okB
       });
@@ -209,7 +213,8 @@
     for (var i = 0; i < frames.length; i++) {
       var f = frames[i];
       if (this.onFrame) this.onFrame(f);
-      if (this.onButton && f.dir === DIR_G2APP && f.cmd === 0x20) this.onButton(f);
+      /* 按键上报：云台以 notify 推 cmd=0x20 / 参数 C0 xx 00 的帧（dir 仍是 3C，别按方向过滤） */
+      if (this.onButton && f.cmd === 0x20) this.onButton(f);
     }
     return frames;
   };

@@ -195,19 +195,11 @@
         .catch(function (e) { dlog('notify 检查异常(' + ((e && e.message) || e) + ')'); })
         .then(function () {
           startPolling();
-          /* 首拍心跳单独发，记录写通道结果（周期性心跳的错误被静默） */
-          state.client.heartbeat().then(function () {
-            dlog('[OUT] 心跳 ok');
-          }, function (e) {
-            dlog('[OUT] 心跳失败: ' + ((e && (e.message || e.name)) || e));
-          });
-          state.client.startHeartbeat(1000);
-          dlog('✓ 云台就绪(心跳1s)');
+          dlog('✓ 云台就绪（官方 App 不发心跳，已停用；按键靠 notify 上报）');
           UI.hud({ ble: t('connected') });
           UI.toast(t('connected'));
-          /* 主动探测：照抄官方 App 帧形 + 官方初始化序列（0x02→0x04→0x05 等应答） */
-          root.setTimeout(function () { sayHello(); }, 2000);
-          root.setTimeout(function () { initSequence(); }, 3500);
+          /* 官方初始化（抓包实锤顺序）：跑完后云台才开始上报按键 */
+          root.setTimeout(function () { runOfficialInit(); }, 1200);
         });
     }).catch(function (err) {
       dlog('✗ 云台连接失败: ' + (err && err.message));
@@ -324,40 +316,63 @@
   function askBattery() { probeOfficial(0x06, '电量查询'); }
   function sayHello() { probeOfficial(0x02, 'hello'); }
 
-  /* 官方初始化序列（来自真机验证过的开源客户端 bleebil 的 init 代码：
-   *   awaitResponse(0x02, 000000) → awaitResponse(0x04, 000000) → awaitResponse(0x05, 000000)
-   * 每条等应答、最多重试 5 次——与"官方 App 连发 5 次才放弃"的抓包现象一致。
-   * 之后顺带试几个查询命令。任何一次收到云台回包立即停止 */
-  var INIT_SEQ = [
-    [0x02, 5], [0x04, 5], [0x05, 5],
-    [0x06, 2], [0x68, 1], [0x24, 1], [0x22, 1]
+  /* 官方初始化序列 —— 2026-10-01 ZY Play 抓包实锤（logs/zyplay-cap1.txt）：
+   *   0x04 连发最多 3 次直到云台应答 → 读序列号 0x7C/0x7D/0x7E/0x7F →
+   *   固定帧 FMT 0x1818 → 0x06 电量。每条等应答，超时重试；跑完后云台才会
+   *   以 notify 主动上报按键（cmd 0x20 / 参数 C0 xx 00） */
+  var INIT_1818 = [0x24, 0x3C, 0x05, 0x00, 0x18, 0x18, 0x09, 0x00, 0x01, 0xA3, 0x16];
+  var OFFICIAL_INIT = [
+    { cmd: 0x04, tries: 3, wait: 400 },
+    { cmd: 0x7C, tries: 2, wait: 250 },
+    { cmd: 0x7D, tries: 2, wait: 250 },
+    { cmd: 0x7E, tries: 2, wait: 250 },
+    { cmd: 0x7F, tries: 2, wait: 250 },
+    { raw: INIT_1818, tag: '0x1818', tries: 2, wait: 250 },
+    { cmd: 0x06, tries: 2, wait: 250 }
   ];
-  function initSequence() {
+
+  function sendRawFrame(bytes, tag) {
+    if (!state.conn) return;
+    var u8 = new Uint8Array(bytes);
+    bt.write(state.conn, u8.buffer).then(function () {
+      dlog('[OUT] ' + tag + ' ' + U.hex(u8));
+    }, function (e) {
+      dlog('[OUT] ' + tag + ' 失败: ' + ((e && (e.message || e.name)) || e));
+    });
+  }
+
+  function runOfficialInit() {
     if (!state.conn) return;
     var i = 0, tries = 0;
-    dlog('初始化序列: 0x02/0x04/0x05 各等应答最多 5 次');
-    function next() {
+    var start = state.rxCount;
+    dlog('官方初始化: 0x04 → 0x7C-0x7F → 0x1818 → 0x06');
+    function step() {
       if (!state.conn) return;
-      if (state.rxCount > 0) { dlog('初始化停止：已收到云台数据'); return; }
-      if (i >= INIT_SEQ.length) { dlog('初始化序列跑完：仍无任何回包'); return; }
-      var cmd = INIT_SEQ[i][0], max = INIT_SEQ[i][1];
+      if (i >= OFFICIAL_INIT.length) {
+        dlog('初始化完成（收到 ' + (state.rxCount - start) + ' 个回包）');
+        return;
+      }
+      var it = OFFICIAL_INIT[i];
       tries++;
-      probeOfficial(cmd, '初始化 0x' + cmd.toString(16) + ' #' + tries);
+      var seen = state.rxCount;
+      if (it.raw) sendRawFrame(it.raw, '初始化 ' + it.tag + ' #' + tries);
+      else probeOfficial(it.cmd, '初始化 0x' + it.cmd.toString(16) + ' #' + tries);
       root.setTimeout(function () {
-        if (state.rxCount > 0) { dlog('初始化停止：已收到云台数据'); return; }
-        if (tries >= max) { i++; tries = 0; }
-        next();
-      }, 600);
+        if (!state.conn) return;
+        if (state.rxCount > seen) { i++; tries = 0; }       /* 有应答 → 下一条 */
+        else if (tries >= it.tries) { i++; tries = 0; }     /* 试满无应答 → 跳过 */
+        step();
+      }, it.wait);
     }
-    next();
+    step();
   }
 
   /* ---------- 云台事件 ---------- */
 
   function onGimbalFrame(f) {
     state.rxCount++;
-    /* 抓字段：前 8 帧 + 之后每 25 帧打原始字节，确认云台实际发出什么 */
-    if (state.rxCount <= 8 || state.rxCount % 25 === 0) {
+    /* 抓字段：前 14 帧 + 之后每 10 帧打原始字节（含初始化应答与按键帧） */
+    if (state.rxCount <= 14 || state.rxCount % 10 === 0) {
       dlog('[IN#' + state.rxCount + '] ' + U.hex(f.raw) + ' cmd=0x' + f.cmd.toString(16) +
         (f.crcOk ? '' : ' CRC✗'));
     }
