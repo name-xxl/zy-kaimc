@@ -99,6 +99,7 @@ node scripts/test-session.js   # 会话层仿真回归（假适配器，不碰�
 3. **2720 的 2MP 相机 HAL 参数不全** → 参数菜单按 `capabilities` 动态生成，缺的自动隐藏，不影响快门功能。
    拍摄上限同样由 HAL 决定：**录像最高 720×480**（`recorderProfiles` 最高档，高/默认/480p 全是它）、**拍照最高 1600×1200（2MP）**、**预览最高 1280×720**。720p/1080p 录像做不了：系统录像 API 没有该档位；唯一旁路是从 1280×720 预览流用 `MediaRecorder`（本机支持 `video/mp4;codecs=avc1`）录制，但它**不写旋转矩阵**，而 KaiOS 播放器对 `.mp4` 又不认矩阵 → 文件会横躺，故不做（2026-10-02 结论）。
 4. **固件无中文字形** → 把 `app/js/strings.js` 的 `LANG` 改为 `'en'`。
+5. **本机没有运动传感器**（内核输入设备只有 matrix_keypad/hall_sensor1/qpnp_pon/gpio-keys，无 accel/gyro/compass，`dumpsys sensorservice` 也空）→ **电子水平仪做不了**（`DeviceMotionEvent` 只是 Gecko 的 API 外壳，没有硬件就永不派发事件）；云台自身姿态又未逆向出上报帧，所以这条路到此为止（2026-10-02 结论）。
 
 ## KaiOS 相机旋转三层模型（2720 实测定论）
 
