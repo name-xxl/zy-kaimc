@@ -48,16 +48,24 @@
     if (el) el.classList.toggle('hidden', !on);
   };
 
-  /* 锁定竖屏方向。Gecko 录像管线按窗口方向角决定写入视频的旋转，
-   * 不锁的话录出来的视频是横的（2720 实测）。 */
+  /* 锁定竖屏方向并等待锁定完成（最长 800ms 兜底）。返回 Promise。
+   * Gecko 录像管线按窗口方向角决定写入视频的 tkhd 旋转
+   * （矩阵 = (传入 rotation + sensorAngle) % 360），不锁方向录像会横。 */
   U.lockPortrait = function () {
-    try {
-      var sc = root.screen;
-      if (sc && sc.orientation && sc.orientation.lock) {
-        var p = sc.orientation.lock('portrait');
-        if (p && typeof p.catch === 'function') p.catch(function () { /* 失败不影响拍摄 */ });
-      }
-    } catch (e) { /* 不支持就跳过 */ }
+    return new Promise(function (resolve) {
+      try {
+        var sc = root.screen;
+        if (sc && sc.orientation && sc.orientation.lock) {
+          var p = sc.orientation.lock('portrait');
+          if (p && typeof p.then === 'function') {
+            p.then(function () { resolve(true); }, function () { resolve(false); });
+            root.setTimeout(function () { resolve(false); }, 800);
+            return;
+          }
+        }
+        resolve(false); /* 无 API：拍不了也不阻塞，方向旋转交由上层处理 */
+      } catch (e) { resolve(false); }
+    });
   };
 
   root.KaiUtil = U;

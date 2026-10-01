@@ -257,6 +257,14 @@
     }
 
     var variants = [];
+    /* 清理 KaiOS 直连路径可能残留的内联样式（跨模式/跨实现切回标准路径时） */
+    videoEl.style.transform = '';
+    videoEl.style.position = '';
+    videoEl.style.left = '';
+    videoEl.style.top = '';
+    videoEl.style.width = '';
+    videoEl.style.height = '';
+    videoEl.style.objectFit = '';
     self._previewCandidates().forEach(function (s) {
       variants.push({ mode: self.mode, previewSize: s });
     });
@@ -413,8 +421,38 @@
     var storage = root.navigator.getDeviceStorage ? root.navigator.getDeviceStorage('videos') : null;
     if (!storage) return Promise.reject(new Error('DeviceStorage(videos) 不可用'));
 
-    /* KaiOS 2720（实测）：startRecording(config, storage, filepath字符串) 返回 Promise，
-     * 录像期间保持 pending；profile 须先经 setConfiguration 选定；
+    /* setConfiguration 的真等待：onsuccess/onerror/3s 超时兜底三保险，
+   * 失败不静默（打 dbg）。resolve(true)=确认成功，false=失败或超时。 */
+  function setConfigAsync(c, cfg, cam) {
+    return new Promise(function (resolve) {
+      var done = false;
+      var fin = function (ok, why) {
+        if (done) return;
+        done = true;
+        if (!ok) cam.dbg('✗ setConfiguration ' + (why || ''));
+        resolve(ok);
+      };
+      try {
+        var r = c.setConfiguration(cfg);
+        if (r && 'onsuccess' in r) {
+          r.onsuccess = function () { fin(true); };
+          r.onerror = function () { fin(false, (r.error && r.error.name) || 'onerror'); };
+          root.setTimeout(function () { fin(true); }, 3000); /* 回调可能不来，超时放行 */
+        } else {
+          root.setTimeout(function () { fin(true); }, 300); /* 无返回值实现 */
+        }
+      } catch (e) {
+        fin(false, '抛异常:' + e.name);
+      }
+    });
+  }
+
+  /* KaiOS 2720（实测）旋转三层模型：
+     * 1) 预览：raw 帧横装需转，由 UI 层 CSS rotate(sensorAngle) 补偿（见 startPreview）；
+     * 2) 录像：编码帧恒为横向原始帧，固件不烤像素旋转；
+     *    tkhd 矩阵 = (传入 rotation + sensorAngle) % 360 —— startRecording 只传
+     *    屏幕方向角（竖屏锁定 = 0），setConfiguration 不带 rotation（与 Gaia 一致）；
+     * 3) 播放：.3gp 路径播放器遵守矩阵 → 正立；.mp4 路径忽略矩阵 → 横放（平台行为）。
      * 录像含音轨需要 audio-capture 权限。 */
     if (typeof c.getPreviewStream !== 'function') {
       var profiles = [];
@@ -422,32 +460,33 @@
       if (!profiles.length) profiles = ['low', 'default', 'high'];
       var profile = (profiles.indexOf('high') !== -1) ? 'high' : profiles[profiles.length - 1];
       return new Promise(function (resolve, reject) {
-        /* 先锁方向并留出传导时间（实测：锁完立刻录会来不及生效），
-         * 之后 setConfiguration 只带 mode/profile——不要带 rotation，
-         * 方向由窗口方向状态决定（已锁定竖屏 → 帧烤入正立）。 */
-        U.lockPortrait();
-        root.setTimeout(function () {
-          try { c.setConfiguration({ mode: 'video', recorderProfile: profile }); } catch (e3) { /* 继续尝试 */ }
-          root.setTimeout(function () {
-            var filename = videoFilename(profile);
-            try {
-              var p = c.startRecording({ rotation: 0, maxFileSizeBytes: 536870912, createPoster: false },
-                storage, filename);
-              self.recording = true;
-              self.dbg('✓ 录像开始 ' + filename + ' (' + profile + ')');
-              if (p && typeof p.then === 'function') {
-                p.then(function () { /* 停止后落定 */ }, function (err) {
-                  self.recording = false;
-                  self.dbg('✗ 录像中断 ' + (err && err.name));
-                });
-              }
-              resolve(filename);
-            } catch (e) {
-              self.dbg('✗ 录像 ' + e.name + ':' + e.message);
-              reject(new Error('录像失败: ' + e.message));
+        /* 方向锁定 → 真等待锁完成 → setConfiguration 真等待（onerror 打日志）→
+         * 300ms 定长传导 → 开录。任何一步静默失败都会让旋转/档位错乱。 */
+        Promise.resolve(U.lockPortrait()).then(function () {
+          return setConfigAsync(c, { mode: 'video', recorderProfile: profile }, self);
+        }).then(function () {
+          return new Promise(function (res) { root.setTimeout(res, 300); });
+        }).then(function () {
+          var filename = videoFilename(profile);
+          try {
+            var p = c.startRecording({ rotation: 0, maxFileSizeBytes: 536870912, createPoster: false },
+              storage, filename);
+            self.recording = true;
+            self.dbg('✓ 录像开始 ' + filename + ' (' + profile + ')');
+            if (p && typeof p.then === 'function') {
+              p.then(function () { /* 停止后落定 */ }, function (err) {
+                self.recording = false;
+                self.dbg('✗ 录像中断 ' + (err && err.name));
+              });
             }
-          }, 500);
-        }, 500);
+            resolve(filename);
+          } catch (e) {
+            self.dbg('✗ 录像 ' + e.name + ':' + e.message);
+            reject(new Error('录像失败: ' + e.message));
+          }
+        }).catch(function (err) {
+          reject(err instanceof Error ? err : new Error('录像前置失败: ' + err));
+        });
       });
     }
 

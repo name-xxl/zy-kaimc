@@ -59,3 +59,14 @@ node scripts/build.js
 2. **KaiOS 实机 GATT 通知可能不触发**（kaios.dev 实测结论）→ 主应用与探针都内置 100ms `readValue` 轮询差分兜底。
 3. **2720 的 2MP 相机 HAL 参数不全** → 参数菜单按 `capabilities` 动态生成，缺的自动隐藏，不影响快门功能。
 4. **固件无中文字形** → 把 `app/js/strings.js` 的 `LANG` 改为 `'en'`。
+
+## KaiOS 相机旋转三层模型（2720 实测定论）
+
+| 层 | 行为 |
+|---|---|
+| 预览 | HAL 出横向原始帧，App 以 CSS `rotate(sensorAngle=270°)` 补偿（与 Gaia kania 官方一致） |
+| 录像 | 编码帧恒为横向原始帧（固件不烤像素旋转）；tkhd 矩阵 = (传入 rotation + sensorAngle) mod 360 = 270°；`setConfiguration` 不带 rotation（Gaia 从不传）；`startRecording` 的 rotation 只传屏幕方向角（竖屏锁定 = 0） |
+| 播放 | `.3gp`：播放器遵守 tkhd 矩阵 → 正立；`.mp4`：忽略矩阵 → 横放。**因此录像固定存 `.3gp`**；竖屏小窗横条为平台行为（系统相机文件同样如此），观看用「全屏」 |
+
+⚠ 前提：录制前必须 `screen.orientation.lock('portrait')`（App 已内置于启动/快门/录像流程），否则矩阵错乱。
+⚠ 调试注意：ffmpeg/PotPlayer 抽帧与播放会自动应用旋转矩阵——「抽出来的帧是正立的」不代表像素烤入了旋转，判断帧方向务必加 `-noautorotate`。

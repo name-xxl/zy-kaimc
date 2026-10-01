@@ -1,19 +1,36 @@
 #!/usr/bin/env node
-/* 解析从真机拉回的录像 MP4 头/尾字节：box 结构、tkhd 旋转矩阵、编码尺寸 */
+/* 解析 MP4/3gp：box 结构、tkhd 显示宽高与旋转矩阵、avc1 编码尺寸。
+ * 用法：node scripts/parse-mp4.js [视频文件]
+ *   带文件参数 → 直接解析该视频（tkhd 矩阵 = (传入 rotation + sensorAngle) % 360 的落地结果）；
+ *   不带参数   → 旧模式：解析 logs/mp4session.out 里 pullfile 导出的 h/t base64。 */
 'use strict';
 const fs = require('fs');
 
-const out = fs.readFileSync('logs/mp4session.out', 'utf8');
-const line = out.split('\n').find((l) => l.includes('"h\\":'));
-if (!line) { console.log('未找到 r3 输出行'); process.exit(1); }
-// 该行形如:   -> "{\"h\":\"....\",\"t\":\"....\",\"s\":\"done\"}"
-const braceStart = line.indexOf('{');
-const braceEnd = line.lastIndexOf('}');
-const jsonText = line.slice(braceStart, braceEnd + 1).replace(/\\"/g, '"').replace(/\\\\/g, '\\');
-const inner = JSON.parse(jsonText);
-const head = Buffer.from(inner.h, 'base64');
-const tail = Buffer.from(inner.t, 'base64');
-console.log('head', head.length, 'bytes | tail', tail.length, 'bytes');
+const argvFile = process.argv[2];
+let head;
+let tail = Buffer.alloc(0);
+
+if (argvFile) {
+  head = fs.readFileSync(argvFile);
+  console.log('文件 ' + argvFile + ' 大小 ' + head.length + 'B（如需 moov 在尾部的完整解析，用 [偏移 长度] 参数拉尾部）');
+  const tailArg = process.argv[3];
+  const tailLen = parseInt(process.argv[4] || '1500', 10);
+  if (tailArg) {
+    const t = fs.readFileSync(tailArg);
+    tail = t.slice(Math.max(0, t.length - tailLen));
+  }
+} else {
+  const out = fs.readFileSync('logs/mp4session.out', 'utf8');
+  const line = out.split('\n').find((l) => l.includes('"h\\":'));
+  if (!line) { console.log('未找到 r3 输出行'); process.exit(1); }
+  const braceStart = line.indexOf('{');
+  const braceEnd = line.lastIndexOf('}');
+  const jsonText = line.slice(braceStart, braceEnd + 1).replace(/\\"/g, '"').replace(/\\\\/g, '\\');
+  const inner = JSON.parse(jsonText);
+  head = Buffer.from(inner.h, 'base64');
+  tail = Buffer.from(inner.t || '', 'base64');
+  console.log('head', head.length, 'bytes | tail', tail.length, 'bytes');
+}
 
 function walk(buf, start, end, depth) {
   let off = start;
