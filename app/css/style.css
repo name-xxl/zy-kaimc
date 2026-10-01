@@ -37,6 +37,21 @@ html, body {
 }
 #hud-rec { color: #ff5252; font-weight: bold; }
 
+#debug {
+  position: absolute; top: 24px; left: 0; right: 0;
+  max-height: 40%;
+  overflow: hidden;
+  background: rgba(0, 0, 0, 0.55);
+  color: #7fe37f;
+  font-size: 10px;
+  font-family: monospace;
+  line-height: 1.35;
+  padding: 2px 4px;
+  pointer-events: none;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
 #flash-overlay {
   position: absolute; top: 0; left: 0; right: 0; bottom: 0;
   background: #fff; opacity: 0;

@@ -1,4 +1,4 @@
-/* 主逻辑：相机取景 + 云台 BLE 连接 + 按键映射 + 键盘操作 */
+/* 主逻辑：相机取景 + 云台 BLE 连接 + 按键映射 + 键盘操作 + 屏幕调试面板 */
 (function (root) {
   'use strict';
 
@@ -9,8 +9,7 @@
   var cam = root.KaiCam;
   var Z = root.Zhiyun;
 
-  /* 云台按键 → 动作。探针（tools/probe）确认 M2 实际字节后在此扩充，
-   * 例如模式键若是独立 cmd，可加一行 '0x??: mode'。 */
+  /* 云台按键 → 动作。探针（tools/probe）确认 M2 实际字节后在此扩充 */
   var BUTTON_MAP = {
     0x20: 'shutter'
   };
@@ -32,10 +31,37 @@
     zoomRatios: [],
     zoomIdx: 0,
     ecList: [],
-    ecNow: 0
+    ecNow: 0,
+    debugOn: true,
+    appLog: []
   };
 
   root.addEventListener('load', boot);
+
+  /* ---------- 调试面板（取景界面按 # 开关） ---------- */
+
+  function dlog(msg) {
+    state.appLog.push(fmtClock() + ' ' + msg);
+    if (state.appLog.length > 60) state.appLog.shift();
+    renderDebug();
+  }
+
+  function renderDebug() {
+    var el = U.byId('debug');
+    if (!el) return;
+    if (!state.debugOn) { el.textContent = ''; U.show('debug', false); return; }
+    U.show('debug', true);
+    var lines = cam.getLog().concat(state.appLog);
+    el.textContent = lines.slice(-12).join('\n');
+  }
+
+  function fmtClock() {
+    var d = new Date();
+    var p = function (n) { return (n < 10 ? '0' : '') + n; };
+    return p(d.getHours()) + ':' + p(d.getMinutes()) + ':' + p(d.getSeconds());
+  }
+
+  /* ---------- 启动 ---------- */
 
   function boot() {
     UI.init();
@@ -47,14 +73,37 @@
     cam.init().then(function () {
       return cam.startPreview(U.byId('preview'));
     }).then(function () {
+      dlog('✓ 相机就绪');
       setupZoomAndEc();
       renderHudParams();
       UI.hud({ ble: t('scan') });
       connectGimbal();
     }).catch(function (err) {
-      UI.toast(err.message || t('camFail'), 4000);
-      UI.hud({ param: t('camFail'), ble: t('scan') });
-      connectGimbal(); /* 相机失败不影响连云台探路 */
+      dlog('✗ 相机初始化失败: ' + (err && err.message));
+      UI.toast(cam.control ? t('previewFail') : t('camAllFail'), 5000);
+      UI.hud({ ble: t('scan') });
+      connectGimbal(); /* 相机失败不影响连云台 */
+    });
+  }
+
+  function retryCamera() {
+    UI.toast(t('retrying'));
+    dlog('手动重试相机(' + state.mode + ')…');
+    if (cam.control) {
+      try { cam.control.release(); } catch (e) { /* 继续 */ }
+      cam.control = null;
+    }
+    cam.mode = state.mode;
+    cam.init().then(function () {
+      return cam.startPreview(U.byId('preview'));
+    }).then(function () {
+      dlog('✓ 相机重试成功');
+      setupZoomAndEc();
+      renderHudParams();
+    }).catch(function (err) {
+      dlog('✗ 相机重试失败: ' + (err && err.message));
+      UI.toast(cam.control ? t('previewFail') : t('camAllFail'), 4000);
+      renderDebug();
     });
   }
 
@@ -64,30 +113,38 @@
     bt.init().then(function () {
       return bt.ensureEnabled();
     }).then(function () {
+      dlog('蓝牙就绪，扫描 ' + GIMBAL_NAME_RE);
+      UI.hud({ ble: t('scan') });
       return waitForGimbal();
     }).then(function (dev) {
+      dlog('发现云台 ' + dev.name + ' @' + dev.address);
       UI.hud({ ble: t('connecting') });
       return bt.connect(dev);
     }).then(function (con) {
       if (!con.writeChar || !con.notifyChar) {
+        dlog('✗ fee9 特征不完整: write=' + !!con.writeChar + ' notify=' + !!con.notifyChar);
         UI.toast(t('gattPoor'), 4000);
         scheduleReconnect(8000);
         return;
       }
+      dlog('✓ GATT 连接，服务 ' + con.services.length + ' 个');
       state.conn = con;
       state.client = new Z.Client(function (buf) { return bt.write(con, buf); }, {
         onFrame: onGimbalFrame,
         onButton: onGimbalButton
       });
       return bt.armNotifications(con, function (val) { state.client.feed(val); })
-        .catch(function () { /* 实机不支持通知时靠轮询 */ })
+        .then(function () { dlog('notify 已开启'); })
+        .catch(function (e) { dlog('notify 不可用(' + e.message + ')，仅轮询'); })
         .then(function () {
           startPolling();
           state.client.startHeartbeat(1000);
+          dlog('✓ 云台就绪(心跳1s+轮询100ms)');
           UI.hud({ ble: t('connected') });
           UI.toast(t('connected'));
         });
     }).catch(function (err) {
+      dlog('✗ 云台连接失败: ' + (err && err.message));
       UI.hud({ ble: 'BT ✗' });
       UI.toast(err.message || t('btFail'), 3000);
       scheduleReconnect(6000);
@@ -135,6 +192,7 @@
   }
 
   function onDisconnected() {
+    dlog('云台断线，3s 后重连');
     stopPolling();
     if (state.client) state.client.stopHeartbeat();
     bt.disconnect(state.conn);
@@ -168,6 +226,7 @@
   }
 
   function onGimbalButton(f) {
+    dlog('云台按键 cmd=0x20 payload=' + U.hex(f.payload));
     var action = BUTTON_MAP[f.cmd] || 'shutter';
     if (action === 'shutter') shutter();
     else if (action === 'mode') switchMode();
@@ -186,8 +245,10 @@
     cam.takePicture().then(function (blob) {
       return cam.saveBlob(blob, 'pictures', cam.photoFilename());
     }).then(function () {
+      dlog('✓ 照片已存 ' + cam.photoFilename());
       UI.toast(t('saved'));
     }).catch(function (err) {
+      dlog('✗ 拍照/保存: ' + (err && err.message));
       UI.toast(err.message || t('saveFail'), 2500);
     });
   }
@@ -203,6 +264,7 @@
           UI.hud({ rec: '● REC ' + fmtTime(state.recSecs) });
         }, 1000);
       }).catch(function (err) {
+        dlog('✗ 录像: ' + (err && err.message));
         UI.toast(err.message || t('recFail'));
       });
     } else {
@@ -232,11 +294,13 @@
     state.mode = target;
     cam.mode = target;
     UI.hud({ mode: target === 'video' ? t('modeVideo') : t('modePhoto') });
+    dlog('切换模式 → ' + target);
     cam.switchMode(target, U.byId('preview')).then(function () {
+      dlog('✓ 模式已切换');
       setupZoomAndEc();
       renderHudParams();
-    }).catch(function () {
-      /* 视频模式打不开时回退拍照模式 */
+    }).catch(function (err) {
+      dlog('✗ 切换失败: ' + (err && err.message));
       state.mode = prev;
       cam.mode = prev;
       UI.hud({ mode: prev === 'video' ? t('modeVideo') : t('modePhoto') });
@@ -321,7 +385,7 @@
   /* ---------- 参数菜单 ---------- */
 
   function openMenu() {
-    if (!cam.control) { UI.toast(t('camFail')); return; }
+    if (!cam.control) { UI.toast(t('camAllFail')); return; }
     var caps = cam.capabilities();
     var items = [];
 
@@ -414,7 +478,13 @@
     var k = e.key;
     if (k === 'Backspace') {
       e.preventDefault();
-      if (UI.menuActive()) closeMenu();
+      if (UI.menuActive()) { closeMenu(); }
+      else { exitApp(); }
+      return;
+    }
+    if (k === '#') {
+      state.debugOn = !state.debugOn;
+      renderDebug();
       return;
     }
     if (UI.menuActive()) {
@@ -437,7 +507,20 @@
       case 'ArrowRight': case '6': ecStep(1); e.preventDefault(); break;
       case '1': cycleQuickParam('whiteBalance'); break;
       case '3': cycleQuickParam('iso'); break;
+      case '9': retryCamera(); break;
     }
+  }
+
+  /* 取景界面按返回键退出应用 */
+  function exitApp() {
+    stopPolling();
+    if (state.client) state.client.stopHeartbeat();
+    if (state.conn) bt.disconnect(state.conn);
+    if (cam.recording) { cam.stopRecording(); stopRecTimer(); }
+    try { root.close(); } catch (e) { /* 非脚本可关时忽略 */ }
+    root.setTimeout(function () {
+      try { root.close(); } catch (e) { /* 二次尝试 */ }
+    }, 250);
   }
 
   function onVis() {

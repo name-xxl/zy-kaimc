@@ -1,6 +1,8 @@
 /* KaiOS mozCamera 封装：打开相机、取景流、拍照、录像、参数读写。
  * Gecko 48 的 CameraControl 方法同时存在回调式与 DOMRequest 式两种形态，
- * 这里全部做双重兼容（done 标志防二次触发）。 */
+ * 全部做双重兼容（done 标志防二次触发）。
+ * 真机各固件行为差异大：打开相机/取景流均多方案自动重试，并把每一步
+ * 的调用与底层报错记入日志（主界面按 # 查看），便于真机排障。 */
 (function (root) {
   'use strict';
 
@@ -8,55 +10,110 @@
 
   function Cam() {
     this.mode = 'picture';      /* 'picture' | 'video' */
-    this.which = 'back';
+    this.which = null;
     this.control = null;
     this.caps = null;
     this.previewStream = null;
     this.recording = false;
+    this.logLines = [];
   }
+
+  Cam.prototype.dbg = function (msg) {
+    this.logLines.push(msg);
+    if (this.logLines.length > 80) this.logLines.shift();
+    try { root.console.log('[cam] ' + msg); } catch (e) { /* 无 console */ }
+  };
+
+  Cam.prototype.getLog = function () { return this.logLines.slice(-14); };
 
   Cam.prototype.manager = function () {
     return root.navigator.mozCameras || root.navigator.mozCamera || null;
   };
 
   Cam.prototype.init = function () {
+    var self = this;
     var mgr = this.manager();
-    if (!mgr) return Promise.reject(new Error('相机 API 不可用（需要 privileged 权限）'));
-    var cams = mgr.getListOfCameras ? mgr.getListOfCameras() : ['back'];
-    this.which = (cams.indexOf('back') !== -1) ? 'back' : (cams[0] || 'back');
-    return this._open();
+    if (!mgr) {
+      self.dbg('✗ mozCameras/mozCamera 都不存在 → App 未以 privileged 运行或系统未开放相机 API');
+      return Promise.reject(new Error('相机 API 不存在（需要 privileged 权限）'));
+    }
+    var names = [];
+    try { names = mgr.getListOfCameras() || []; } catch (e) {
+      self.dbg('getListOfCameras 异常: ' + e.message);
+    }
+    self.dbg('API=' + (root.navigator.mozCameras ? 'mozCameras' : 'mozCamera') +
+      '，摄像头=[' + names.join(',') + ']');
+    var candidates = names.length ? names.slice() : ['back', 'front'];
+    if (candidates.indexOf('back') !== -1) {
+      candidates = ['back'].concat(candidates.filter(function (c) { return c !== 'back'; }));
+    }
+    var i = 0;
+    var tryNext = function () {
+      if (i >= candidates.length) {
+        return Promise.reject(new Error('getCamera 所有候选均失败（按 # 看详情）'));
+      }
+      self.which = candidates[i++];
+      return self._open().catch(function (err) {
+        self.dbg('--> 换下一个摄像头重试');
+        return tryNext();
+      });
+    };
+    return tryNext();
   };
 
   Cam.prototype._open = function () {
     var self = this;
     var mgr = this.manager();
-    var req = mgr.getCamera(this.which, { mode: this.mode });
-    return U.prom(req, 'getCamera').then(function (res) {
-      var r = res || {};
-      self.control = r.camera || r; /* 有的实现直接给 CameraControl */
-      self.caps = self.control.capabilities || {};
-      return self;
-    });
+    var configs = [{ mode: this.mode }, null]; /* 带 mode 配置 → 默认配置 */
+    var idx = 0;
+    var tryOne = function () {
+      var cfg = configs[idx++];
+      var label = cfg ? ('{mode:' + cfg.mode + '}') : '(默认配置)';
+      var p = new Promise(function (resolve, reject) {
+        var req;
+        try {
+          req = cfg ? mgr.getCamera(self.which, cfg) : mgr.getCamera(self.which);
+        } catch (e) {
+          reject(new Error('调用抛异常: ' + e.message));
+          return;
+        }
+        U.prom(req, 'getCamera').then(resolve, reject);
+      });
+      return U.withTimeout(p, 12000, 'getCamera(' + self.which + ',' + label + ')')
+        .then(function (res) {
+          var r = res || {};
+          var control = r.camera || r; /* 有的实现直接给 CameraControl */
+          if (!control || !control.capabilities) {
+            throw new Error('返回结构异常（无 capabilities）');
+          }
+          self.control = control;
+          self.caps = control.capabilities || {};
+          self.dbg('✓ getCamera(' + self.which + ',' + label + ')');
+          self._logCaps();
+          return self;
+        }, function (err) {
+          self.dbg('✗ getCamera(' + self.which + ',' + label + '): ' + err.message);
+          if (idx < configs.length) return tryOne();
+          throw err;
+        });
+    };
+    return tryOne();
   };
 
-  /* 能力清单（参数菜单据此生成，缺什么隐藏什么） */
-  Cam.prototype.capabilities = function () {
+  Cam.prototype._logCaps = function () {
     var c = this.caps || {};
-    return {
-      pictureSizes: c.pictureSizes || [],
-      previewSizes: c.previewSizes || [],
-      recorderProfiles: c.recorderProfiles || [],
-      whiteBalanceModes: c.whiteBalanceModes || [],
-      isoModes: c.isoModes || [],
-      sceneModes: c.sceneModes || [],
-      effects: c.effects || [],
-      flashModes: c.flashModes || [],
-      focusModes: c.focusModes || [],
-      zoomRatios: c.zoomRatios || [],
-      ecMin: (c.minExposureCompensation !== undefined) ? c.minExposureCompensation : 0,
-      ecMax: (c.maxExposureCompensation !== undefined) ? c.maxExposureCompensation : 0,
-      ecStep: (c.exposureCompensationStep !== undefined) ? c.exposureCompensationStep : 1
+    var self = this;
+    var sizes = function (arr) {
+      return (arr || []).slice(0, 4).map(function (s) {
+        return s.width + 'x' + s.height;
+      }).join(',');
     };
+    self.dbg('能力: 预览[' + sizes(c.previewSizes) + ']' +
+      ' 照片[' + sizes(c.pictureSizes) + ']' +
+      ' 录制[' + (c.recorderProfiles || []).join(',') + ']' +
+      ' WB=' + (c.whiteBalanceModes || []).length +
+      ' ISO=' + (c.isoModes || []).length +
+      ' ZOOM=' + (c.zoomRatios || []).length);
   };
 
   Cam.prototype.getParam = function (key) {
@@ -94,15 +151,83 @@
     } catch (e) { /* 该机型不支持 */ }
   };
 
-  Cam.prototype._pickPreviewSize = function () {
+  /* 取景尺寸候选：capabilities 里最接近屏幕的几个；没有则给常见兜底 */
+  Cam.prototype._previewCandidates = function () {
     var list = (this.caps && this.caps.previewSizes) || [];
     var target = 240 * 320;
-    var best = null, bestDiff = Infinity;
-    list.forEach(function (s) {
-      var diff = Math.abs(s.width * s.height - target);
-      if (diff < bestDiff) { bestDiff = diff; best = s; }
+    var sorted = list.slice().sort(function (a, b) {
+      return Math.abs(a.width * a.height - target) - Math.abs(b.width * b.height - target);
     });
-    return best || { width: 320, height: 240 };
+    if (!sorted.length) {
+      sorted = [{ width: 320, height: 240 }, { width: 240, height: 320 }, { width: 640, height: 480 }];
+    }
+    return sorted.slice(0, 5);
+  };
+
+  Cam.prototype.startPreview = function (videoEl) {
+    var self = this;
+    var c = this.control;
+    if (!c) return Promise.reject(new Error('相机未打开'));
+
+    var variants = [];
+    self._previewCandidates().forEach(function (s) {
+      variants.push({ mode: self.mode, previewSize: s });
+    });
+    variants.push({ mode: self.mode }); /* 不带尺寸的兜底 */
+
+    var attach = function (stream) {
+      self.previewStream = stream;
+      try {
+        if ('mozSrcObject' in videoEl) videoEl.mozSrcObject = stream;
+        else videoEl.srcObject = stream;
+      } catch (e) { /* 渲染失败不打断流程 */ }
+      try { videoEl.play(); } catch (e) {}
+      return stream;
+    };
+
+    var tryVariant = function () {
+      if (!variants.length) {
+        return Promise.reject(new Error('取景流所有方案均失败（按 # 看详情）'));
+      }
+      var cfg = variants.shift();
+      return new Promise(function (resolve) {
+        var settled = false;
+        var ok = function (stream) {
+          if (settled || !stream) return;
+          settled = true;
+          self.dbg('✓ 取景 ' + JSON.stringify(cfg));
+          resolve(attach(stream));
+        };
+        var err = function (why) {
+          if (settled) return;
+          settled = true;
+          self.dbg('✗ 取景 ' + JSON.stringify(cfg) + ' ' + (why || ''));
+          resolve(null);
+        };
+        var ret;
+        try { ret = c.getPreviewStream(cfg, ok, err); }
+        catch (e) { err('抛异常:' + e.message); return; }
+        if (ret && 'onsuccess' in ret) {
+          ret.onsuccess = function () { ok(ret.result); };
+          ret.onerror = function () {
+            var why = 'onerror';
+            try { why = ret.error ? (ret.error.name + ':' + (ret.error.message || '')) : why; } catch (e) {}
+            err(why);
+          };
+        }
+        root.setTimeout(function () { err('超时'); }, 4000);
+      }).then(function (got) {
+        return got ? got : tryVariant();
+      });
+    };
+    return tryVariant();
+  };
+
+  Cam.prototype.stopPreview = function () {
+    if (this.previewStream && this.previewStream.stop) {
+      try { this.previewStream.stop(); } catch (e) { /* 已停止 */ }
+    }
+    this.previewStream = null;
   };
 
   Cam.prototype._pickPictureSize = function () {
@@ -115,67 +240,46 @@
     return best;
   };
 
-  Cam.prototype.startPreview = function (videoEl) {
-    var self = this;
-    var c = this.control;
-    if (!c) return Promise.reject(new Error('相机未打开'));
-    return new Promise(function (resolve, reject) {
-      var done = false;
-      var ok = function (stream) {
-        if (done) return;
-        done = true;
-        self.previewStream = stream;
-        try {
-          if ('mozSrcObject' in videoEl) videoEl.mozSrcObject = stream;
-          else videoEl.srcObject = stream;
-        } catch (e) { /* 渲染失败不打断流程 */ }
-        try { videoEl.play(); } catch (e) {}
-        resolve(stream);
-      };
-      var err = function () {
-        if (done) return;
-        done = true;
-        reject(new Error('取景流启动失败'));
-      };
-      var ret;
-      try {
-        ret = c.getPreviewStream({ mode: self.mode, previewSize: self._pickPreviewSize() }, ok, err);
-      } catch (e) { err(); return; }
-      if (ret && 'onsuccess' in ret) {
-        ret.onsuccess = function () { ok(ret.result); };
-        ret.onerror = function () { err(ret.error); };
-      }
-    });
-  };
-
-  Cam.prototype.stopPreview = function () {
-    if (this.previewStream && this.previewStream.stop) {
-      try { this.previewStream.stop(); } catch (e) { /* 已停止 */ }
-    }
-    this.previewStream = null;
-  };
-
   Cam.prototype.takePicture = function () {
     var self = this;
     var c = this.control;
     if (!c) return Promise.reject(new Error('相机未打开'));
-    var cfg = { fileFormat: 'jpeg', dateTime: Date.now() };
     var size = this._pickPictureSize();
-    if (size) cfg.pictureSize = size;
-    return new Promise(function (resolve, reject) {
-      var done = false;
-      var ok = function (blob) { if (!done) { done = true; resolve(blob); } };
-      var err = function () { if (!done) { done = true; reject(new Error('拍照失败')); } };
-      var ret;
-      try { ret = c.takePicture(cfg, ok, err); } catch (e) { err(); return; }
-      if (ret && 'onsuccess' in ret) {
-        ret.onsuccess = function () { ok(ret.result); };
-        ret.onerror = function () { err(ret.error); };
-      }
-    }).then(function (blob) {
-      if (c.resumePreview) { try { c.resumePreview(); } catch (e) { /* 部分机型自动恢复 */ } }
-      return blob;
-    });
+    var variants = [{ fileFormat: 'jpeg', dateTime: Date.now() }];
+    if (size) variants[0].pictureSize = size;
+    variants.push({ fileFormat: 'jpeg' });
+
+    var tryOne = function () {
+      var cfg = variants.shift();
+      if (!cfg) return Promise.reject(new Error('拍照失败（按 # 看详情）'));
+      return new Promise(function (resolve, reject) {
+        var done = false;
+        var ok = function (blob) { if (!done) { done = true; resolve(blob); } };
+        var err = function (why) {
+          if (done) return;
+          done = true;
+          self.dbg('✗ 拍照 ' + JSON.stringify(cfg) + ' ' + (why || ''));
+          reject(new Error('拍照失败'));
+        };
+        var ret;
+        try { ret = c.takePicture(cfg, ok, err); } catch (e) { err('抛异常:' + e.message); return; }
+        if (ret && 'onsuccess' in ret) {
+          ret.onsuccess = function () { ok(ret.result); };
+          ret.onerror = function () {
+            var why = 'onerror';
+            try { why = ret.error ? (ret.error.name + ':' + (ret.error.message || '')) : why; } catch (e) {}
+            err(why);
+          };
+        }
+      }).then(function (blob) {
+        self.dbg('✓ 拍照 ' + JSON.stringify(cfg));
+        if (c.resumePreview) { try { c.resumePreview(); } catch (e) { /* 部分机型自动恢复 */ } }
+        return blob;
+      }, function (err) {
+        return tryOne();
+      });
+    };
+    return tryOne();
   };
 
   Cam.prototype.saveBlob = function (blob, kind, filename) {
@@ -203,12 +307,17 @@
     return new Promise(function (resolve, reject) {
       var done = false;
       var ok = function () {
-        if (!done) { done = true; self.recording = true; resolve(filename); }
+        if (!done) { done = true; self.recording = true; self.dbg('✓ 录像开始 ' + filename); resolve(filename); }
       };
-      var err = function () { if (!done) { done = true; reject(new Error('录像启动失败')); } };
+      var err = function (why) {
+        if (done) return;
+        done = true;
+        self.dbg('✗ 录像启动 ' + (why || ''));
+        reject(new Error('录像启动失败'));
+      };
       var ret;
-      try { ret = c.startRecording(cfg, storage, meta, ok, err); } catch (e) { err(); return; }
-      if (ret && 'onsuccess' in ret) { ret.onsuccess = ok; ret.onerror = err; }
+      try { ret = c.startRecording(cfg, storage, meta, ok, err); } catch (e) { err('抛异常:' + e.message); return; }
+      if (ret && 'onsuccess' in ret) { ret.onsuccess = ok; ret.onerror = function () { err('onerror'); }; }
     });
   };
 
@@ -216,7 +325,7 @@
     var c = this.control;
     this.recording = false;
     if (c && c.stopRecording) {
-      try { c.stopRecording(); } catch (e) { /* 已停止 */ }
+      try { c.stopRecording(); this.dbg('■ 录像停止'); } catch (e) { /* 已停止 */ }
     }
   };
 
