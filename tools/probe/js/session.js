@@ -22,6 +22,7 @@
     this.conn = null;
     this.client = null;
     this.pollTimer = null;
+    this.pollMs = C.POLL_MS;
     this.lastVal = null;
     this.rxCount = 0;
     this.initTimer = null;
@@ -108,12 +109,12 @@
     });
   };
 
-  /* 接收：100ms 轮询特征对象 .value（本地缓存读，无 ATT 往返）→ 差分 → 喂协议层。
+  /* 接收：轮询特征对象 .value（本地缓存读，无 ATT 往返）→ 差分 → 喂协议层。
    * 真机实测：通知进栈、.value 更新，但 oncharacteristicchanged 永不触发 */
-  Session.prototype.startPoll = function () {
+  Session.prototype.startPoll = function (reset) {
     var self = this;
     this.stopPoll();
-    this.lastVal = null;
+    if (reset !== false) this.lastVal = null;   /* 换周期重启时保留 lastVal，避免重复喂同一帧 */
     this.pollTimer = root.setInterval(function () {
       var con = self.conn;
       if (!con || !con.notifyChar) return;
@@ -124,7 +125,14 @@
       if (self.lastVal && bytesEqual(self.lastVal, v)) return;
       self.lastVal = v;
       if (self.client) self.client.feed(v);
-    }, C.POLL_MS);
+    }, this.pollMs);
+  };
+
+  /* 调整接收轮询周期（前后台切换用）；保留 lastVal，不重放上一帧 */
+  Session.prototype.setPollMs = function (ms) {
+    if (!ms || ms === this.pollMs) return;
+    this.pollMs = ms;
+    if (this.pollTimer) this.startPoll(false);
   };
 
   Session.prototype.stopPoll = function () {

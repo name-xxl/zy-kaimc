@@ -15,7 +15,7 @@
   /* 本文件只做编排：相机 + UI/键位 + 云台会话(KaiSession) + 按键分发(KaiButtons)。
    * 键码与时序常量见 config.js（AppCfg.KEY / AppCfg.*_MS） */
 
-  var APP_VERSION = 'v7.9';
+  var APP_VERSION = 'v8.0';
   var GIMBAL_NAME_RE = /CRANE[-_ ]?M2/i;
 
   var state = {
@@ -31,6 +31,8 @@
     bleText: '',
     lastKeyAt: 0,
     lastModeQuery: 0,
+    lastFrameAt: 0,
+    gimbalAlive: true,
     battTimer: null,
     modeTimer: null,
     rxCount: 0,
@@ -263,7 +265,7 @@
     if (state.cdTimer) { root.clearInterval(state.cdTimer); state.cdTimer = null; }
   }
 
-  /* ---------- 周期查询：电量（0x06）/ 云台状态（0x1817）---------- */
+  /* ---------- 周期查询：电量（0x06）/ 模式（0x27）---------- */
 
   function queryBattery() {
     if (!session) return;
@@ -282,15 +284,30 @@
      * 真正发帧按上面节奏走——多几个 14 字节小包，射频开销可忽略 */
     state.lastKeyAt = 0;
     state.lastModeQuery = 0;
+    state.lastFrameAt = 0;      /* 云台最后一次回包时间（待机/无应答判定用） */
+    state.gimbalAlive = true;
     if (AppCfg.MODE_QUERY_MS) {
       state.modeTimer = root.setInterval(function () {
         if (!session) return;
         var now = Date.now();
+        checkGimbalSilent(now);
         if (now - state.lastModeQuery < modeQueryDelay(now)) return;
         state.lastModeQuery = now;
         session.sendRaw(AppCfg.FRAME_MODE_QUERY, true).catch(function () { /* 忽略 */ });
       }, 250);
     }
+  }
+
+  /* 云台待机（休眠）实测：BLE 链路仍在、但对任何命令都不应答 —— 靠"连续无应答"判定，
+   * 避免把休眠前的缓存电量/模式当实时值显示。门限 = 2 个查询周期 + 3s */
+  function checkGimbalSilent(now) {
+    if (!state.lastFrameAt) return;
+    var limit = modeQueryDelay(now) * 2 + 3000;
+    var alive = (now - state.lastFrameAt) < limit;
+    if (alive === state.gimbalAlive) return;
+    state.gimbalAlive = alive;
+    dlog(alive ? '云台恢复应答' : '云台无应答 ' + Math.round((now - state.lastFrameAt) / 1000) + 's（待机？）');
+    renderHudBle();
   }
 
   /* 当前该用多长的查询间隔：人刚动过云台 → 快 */
@@ -314,6 +331,8 @@
     state.gimbalBattRaw = null;
     state.gimbalMode = null;
     state.gimbalConnected = false;
+    state.lastFrameAt = 0;
+    state.gimbalAlive = true;
     renderHudParams();
     scheduleReconnect();
   }
@@ -359,6 +378,7 @@
 
   function onGimbalFrame(f) {
     state.rxCount++;
+    state.lastFrameAt = Date.now();
     /* 抓字段：前 14 帧 + 之后每 10 帧打原始字节（含初始化应答与按键帧） */
     if (state.rxCount <= 14 || state.rxCount % 10 === 0) {
       dlog('[IN#' + state.rxCount + '] ' + U.hex(f.raw) + ' cmd=0x' + f.cmd.toString(16) +
@@ -596,6 +616,11 @@
   }
 
   function renderHudBle() {
+    /* 云台休眠/无应答时不显示陈旧的缓存电量与模式，直接说明现状 */
+    if (state.gimbalConnected && !state.gimbalAlive) {
+      UI.hud({ ble: t('gimbalSilent') });
+      return;
+    }
     var txt = state.bleText || '';
     if (state.gimbalConnected && state.gimbalBatt !== null) txt += ' ' + state.gimbalBatt + '%';
     if (state.gimbalConnected && state.gimbalMode !== null) {
@@ -776,11 +801,18 @@
         UI.hud({ rec: '' });
       }
       cam.stopPreview();
+      /* 后台降级：屏幕/相机都停了，周期查询与 10Hz 收包轮询基本无意义 → 停查询、放宽轮询 */
+      stopQueries();
+      if (session) session.setPollMs(AppCfg.POLL_HIDDEN_MS || 500);
     } else {
       goFullscreen();
       U.lockPortrait();
       if (cam.control) {
         cam.startPreview(U.byId('preview')).catch(function () {});
+      }
+      if (session) {
+        session.setPollMs(AppCfg.POLL_MS);
+        startQueries();       /* 回前台恢复查询；lastFrameAt 会在首个回包时刷新 */
       }
     }
   }
