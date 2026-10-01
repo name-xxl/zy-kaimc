@@ -15,7 +15,7 @@
   /* 本文件只做编排：相机 + UI/键位 + 云台会话(KaiSession) + 按键分发(KaiButtons)。
    * 键码与时序常量见 config.js（AppCfg.KEY / AppCfg.*_MS） */
 
-  var APP_VERSION = 'v7.5';
+  var APP_VERSION = 'v7.6';
   var GIMBAL_NAME_RE = /CRANE[-_ ]?M2/i;
 
   var state = {
@@ -26,7 +26,7 @@
     cdTimer: null,
     gimbalBatt: null,
     gimbalBattRaw: null,
-    gimbalState: null,
+    gimbalMode: null,
     gimbalConnected: false,
     bleText: '',
     battTimer: null,
@@ -262,7 +262,7 @@
     }
     if (AppCfg.MODE_QUERY_MS) {
       state.modeTimer = root.setInterval(function () {
-        if (session) session.sendRaw(AppCfg.FRAME_1817, true).catch(function () { /* 忽略 */ });
+        if (session) session.sendRaw(AppCfg.FRAME_MODE_QUERY, true).catch(function () { /* 忽略 */ });
       }, AppCfg.MODE_QUERY_MS);
     }
   }
@@ -279,7 +279,7 @@
     if (session) { session.close(); session = null; }
     state.gimbalBatt = null;
     state.gimbalBattRaw = null;
-    state.gimbalState = null;
+    state.gimbalMode = null;
     state.gimbalConnected = false;
     renderHudParams();
     scheduleReconnect();
@@ -345,12 +345,13 @@
       }
     }
 
-    /* 云台状态帧（官方 0x1817 查询的应答，FMT=0x1817）：末字节为状态值，变化才记 */
-    if (f.format === 0x1817 && f.raw.length >= 3) {
-      var st = f.raw[f.raw.length - 3];
-      if (st !== state.gimbalState) {
-        state.gimbalState = st;
-        dlog('云台状态 0x' + st.toString(16) + '（切模式时可对照）');
+    /* 云台模式应答（0x27 查询）：ARGS = 00 <模式> 00；变化才记 + 顶部状态行显示 */
+    if (f.cmd === 0x27 && f.payload.length >= 2) {
+      var mode = f.payload[1];
+      if (mode !== state.gimbalMode) {
+        state.gimbalMode = mode;
+        dlog('云台模式 0x' + mode.toString(16) + (modeName(mode) ? ' = ' + modeName(mode) : '（未登记）'));
+        renderHudBle();
       }
     }
 
@@ -548,7 +549,13 @@
     return 0;
   }
 
-  /* 顶部状态行：连接状态文本 +（连上且已知时）云台电量，如「云台已连接 85%」 */
+  /* 模式码 → 名称（PF/L/F/POV/GO；未登记的返回 null） */
+  function modeName(code) {
+    var names = AppCfg.MODE_NAMES || [];
+    return (code >= 0 && code < names.length) ? names[code] : null;
+  }
+
+  /* 顶部状态行：连接状态文本 +（连上且已知时）云台电量与模式，如「云台已连接 10% F」 */
   function setHudBle(txt) {
     state.bleText = txt;
     renderHudBle();
@@ -557,6 +564,8 @@
   function renderHudBle() {
     var txt = state.bleText || '';
     if (state.gimbalConnected && state.gimbalBatt !== null) txt += ' ' + state.gimbalBatt + '%';
+    var m = (state.gimbalConnected && state.gimbalMode !== null) ? modeName(state.gimbalMode) : null;
+    if (m) txt += ' ' + m;
     UI.hud({ ble: txt });
   }
 
