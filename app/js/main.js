@@ -303,14 +303,38 @@
 
   /* 官方帧形探测（见 Zhiyun.buildOfficialFrame）：照抄官方 App 的 app→gimbal 帧形与参数长度。
    * 我们的旧帧形（16 位序号 + TYPE）可能不被云台接受，这里是关键对照实验 */
-  function probeOfficial(cmd, tag) {
+  function probeOfficial(cmd, tag) { sendCmd(cmd, [0x00, 0x00, 0x00], tag); }
+
+  function sendCmd(cmd, args, tag) {
     if (!state.conn) return;
-    var frame = Z.buildOfficialFrame(cmd);
+    var frame = Z.buildOfficialFrame(cmd, args);
     bt.write(state.conn, frame.buffer).then(function () {
-      dlog('[OUT] ' + tag + ' 官方帧 ' + U.hex(frame));
-    }).catch(function (e) {
+      dlog('[OUT] ' + tag + ' ' + U.hex(frame));
+    }, function (e) {
       dlog('[OUT] ' + tag + ' 失败: ' + ((e && (e.message || e.name)) || e));
     });
+  }
+
+  /* 可见写入测试：ZY Play 抓包里的运动指令（cmd 0x01/0x02/0x03 + 参数 10 xx xx）。
+   * 按 7 连发 6 轮：云台应出现可见转动 → 证明我们的写入真的到达云台（而非只在本地"成功"） */
+  var MOTION_FRAMES = [
+    [0x01, [0x10, 0xD4, 0x0E]],
+    [0x02, [0x10, 0x00, 0x08]],
+    [0x03, [0x10, 0xD4, 0x0E]]
+  ];
+  function motionTest() {
+    if (!state.conn) { dlog('未连接，无法做可见测试'); return; }
+    var round = 0;
+    dlog('可见测试开始：看云台会不会动（共 6 轮）');
+    var timer = root.setInterval(function () {
+      if (!state.conn || round >= 6) {
+        root.clearInterval(timer);
+        dlog('可见测试结束：云台动了=我们的写入有效；没动=写没出去');
+        return;
+      }
+      MOTION_FRAMES.forEach(function (mf) { sendCmd(mf[0], mf[1], '运动 0x' + mf[0].toString(16)); });
+      round++;
+    }, 200);
   }
 
   function askBattery() { probeOfficial(0x06, '电量查询'); }
@@ -670,6 +694,7 @@
       case '3': cycleQuickParam('iso'); break;
       case '0': askBattery(); break;
       case '5': sayHello(); break;
+      case '7': motionTest(); break;
       case '9': retryCamera(); break;
     }
   }
