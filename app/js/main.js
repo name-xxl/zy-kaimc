@@ -32,7 +32,7 @@
     zoomIdx: 0,
     ecList: [],
     ecNow: 0,
-    debugOn: true,
+    debugOn: false,
     appLog: []
   };
 
@@ -45,11 +45,22 @@
     try { if (cam.control) cam.control.release(); } catch (e) { /* 已释放 */ }
   }
 
+  /* 满屏：收复系统状态栏区域（240x294 → 240x320）。切回前台后需重新请求 */
+  function goFullscreen() {
+    try {
+      if (document.mozFullScreenEnabled && !document.mozFullScreen &&
+          document.documentElement.mozRequestFullScreen) {
+        document.documentElement.mozRequestFullScreen();
+      }
+    } catch (e) { /* 不支持就维持普通布局 */ }
+  }
+
   /* ---------- 调试面板（取景界面按 # 开关） ---------- */
 
   function dlog(msg) {
     state.appLog.push(fmtClock() + ' ' + msg);
     if (state.appLog.length > 60) state.appLog.shift();
+    try { root.console.log('[app] ' + msg); } catch (e) { /* 无 console */ }
     renderDebug();
   }
 
@@ -72,6 +83,7 @@
 
   function boot() {
     UI.init();
+    goFullscreen();
     setFinderKeys();
     UI.hud({ ble: t('camInit'), mode: t('modePhoto') });
     root.addEventListener('keydown', onKey);
@@ -564,8 +576,11 @@
         UI.hud({ rec: '' });
       }
       cam.stopPreview();
-    } else if (cam.control) {
-      cam.startPreview(U.byId('preview')).catch(function () {});
+    } else {
+      goFullscreen();
+      if (cam.control) {
+        cam.startPreview(U.byId('preview')).catch(function () {});
+      }
     }
   }
 })(typeof window !== 'undefined' ? window : globalThis);
