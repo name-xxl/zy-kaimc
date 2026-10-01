@@ -11,6 +11,7 @@
   "permissions": {
     "bluetooth": {},
     "camera": {},
+    "audio-capture": {},
     "device-storage:pictures": { "access": "readwrite" },
     "device-storage:videos": { "access": "readwrite" }
   },

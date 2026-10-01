@@ -163,10 +163,15 @@
   Cam.prototype.capabilities = function () {
     var c = this.caps || {};
     var nonEmpty = function (a) { return (a && a.length) ? a : []; };
+    /* KaiOS 的 recorderProfiles 是对象（键=profile 名），统一转数组 */
+    var recProfiles = c.recorderProfiles;
+    if (recProfiles && !recProfiles.length && typeof recProfiles === 'object') {
+      recProfiles = Object.keys(recProfiles);
+    }
     var out = {
       pictureSizes: nonEmpty(c.pictureSizes),
       previewSizes: nonEmpty(c.previewSizes),
-      recorderProfiles: nonEmpty(c.recorderProfiles),
+      recorderProfiles: nonEmpty(recProfiles),
       whiteBalanceModes: nonEmpty(c.whiteBalanceModes),
       isoModes: nonEmpty(c.isoModes),
       sceneModes: nonEmpty(c.sceneModes),
@@ -216,7 +221,8 @@
     if (!c) return Promise.reject(new Error('相机未打开'));
 
     /* KaiOS 2720（实测）：CameraControl 没有 getPreviewStream，
-     * control 本身就是 MediaStream，直接喂给 video 即可（320x240 帧流已验证）。 */
+     * control 本身就是 MediaStream，直接喂给 video 即可（320x240 帧流已验证）。
+     * 传感器横装（sensorAngle=270），按安装角旋转铺满竖屏。 */
     if (typeof c.getPreviewStream !== 'function') {
       return new Promise(function (resolve, reject) {
         try {
@@ -229,7 +235,21 @@
           return;
         }
         self.previewStream = c;
-        self.dbg('✓ 预览直连(control=MediaStream)');
+        var ang = 0;
+        try { ang = Number(c.sensorAngle) || 0; } catch (e2) { /* 读不到就不转 */ }
+        ang = ((ang % 360) + 360) % 360;
+        if (ang === 90 || ang === 270) {
+          videoEl.style.position = 'absolute';
+          videoEl.style.left = '50%';
+          videoEl.style.top = '50%';
+          videoEl.style.width = root.innerHeight + 'px';
+          videoEl.style.height = root.innerWidth + 'px';
+          videoEl.style.transform = 'translate(-50%,-50%) rotate(' + ang + 'deg)';
+          videoEl.style.objectFit = 'cover';
+        } else {
+          videoEl.style.transform = '';
+        }
+        self.dbg('✓ 预览直连 angle=' + ang);
         resolve(c);
       });
     }
@@ -323,7 +343,8 @@
           fn(arg);
         };
         c.onpicture = function (ev) {
-          var blob = ev && ev.blob;
+          /* KaiOS 的照片在 ev.data（BlobEvent 变体），标准实现是 ev.blob，两者都收 */
+          var blob = ev && (ev.data || ev.blob);
           if (blob) finish(resolve, blob);
           else finish(reject, new Error('onpicture 无 blob'));
         };
@@ -389,20 +410,55 @@
     if (!c) return Promise.reject(new Error('相机未打开'));
     var storage = root.navigator.getDeviceStorage ? root.navigator.getDeviceStorage('videos') : null;
     if (!storage) return Promise.reject(new Error('DeviceStorage(videos) 不可用'));
-    var cfg = { mode: 'video' };
-    var profiles = (this.caps && this.caps.recorderProfiles) || [];
-    var profile = null, i;
-    for (i = 0; i < profiles.length; i++) {
-      if (String(profiles[i]).indexOf('mp4') !== -1) { profile = profiles[i]; break; }
+
+    /* KaiOS 2720（实测）：startRecording(config, storage, filepath字符串) 返回 Promise，
+     * 录像期间保持 pending；profile 须先经 setConfiguration 选定；
+     * 录像含音轨需要 audio-capture 权限。 */
+    if (typeof c.getPreviewStream !== 'function') {
+      var profiles = [];
+      try { profiles = Object.keys((this.caps && this.caps.recorderProfiles) || {}); } catch (e) { /* 无列表 */ }
+      if (!profiles.length) profiles = ['low', 'default', 'high'];
+      var profile = (profiles.indexOf('high') !== -1) ? 'high' : profiles[profiles.length - 1];
+      var ang = 270;
+      try { ang = Number(c.sensorAngle) || 270; } catch (e2) { /* 默认 */ }
+      return new Promise(function (resolve, reject) {
+        try { c.setConfiguration({ mode: 'video', recorderProfile: profile }); } catch (e3) { /* 继续尝试 */ }
+        root.setTimeout(function () {
+          var filename = videoFilename(profile);
+          try {
+            var p = c.startRecording({ rotation: ang, maxFileSizeBytes: 536870912, createPoster: false },
+              storage, filename);
+            self.recording = true;
+            self.dbg('✓ 录像开始 ' + filename + ' (' + profile + ')');
+            if (p && typeof p.then === 'function') {
+              p.then(function () { /* 停止后落定 */ }, function (err) {
+                self.recording = false;
+                self.dbg('✗ 录像中断 ' + (err && err.name));
+              });
+            }
+            resolve(filename);
+          } catch (e) {
+            self.dbg('✗ 录像 ' + e.name + ':' + e.message);
+            reject(new Error('录像失败: ' + e.message));
+          }
+        }, 600);
+      });
     }
-    if (!profile && profiles.length) profile = profiles[profiles.length - 1];
-    if (profile) cfg.recorderProfile = profile;
-    var filename = videoFilename(profile);
-    var meta = { filename: filename };
+
+    var cfg = { mode: 'video' };
+    var profiles2 = (this.caps && this.caps.recorderProfiles) || [];
+    var profile2 = null, i;
+    for (i = 0; i < profiles2.length; i++) {
+      if (String(profiles2[i]).indexOf('mp4') !== -1) { profile2 = profiles2[i]; break; }
+    }
+    if (!profile2 && profiles2.length) profile2 = profiles2[profiles2.length - 1];
+    if (profile2) cfg.recorderProfile = profile2;
+    var filename2 = videoFilename(profile2);
+    var meta = { filename: filename2 };
     return new Promise(function (resolve, reject) {
       var done = false;
       var ok = function () {
-        if (!done) { done = true; self.recording = true; self.dbg('✓ 录像开始 ' + filename); resolve(filename); }
+        if (!done) { done = true; self.recording = true; self.dbg('✓ 录像开始 ' + filename2); resolve(filename2); }
       };
       var err = function (why) {
         if (done) return;
