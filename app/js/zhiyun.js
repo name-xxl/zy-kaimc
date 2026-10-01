@@ -49,25 +49,26 @@
   var FMT_CMD = 0x1812, FMT_HB = 0x1815;
   var TYPE_CMD = 0x01, TYPE_RSP = 0x10;
 
-  function buildFrame(dir, format, seq, type, cmd, payload) {
-    payload = payload || [];
-    var bodyLen = 2 + 2 + 1 + 1 + payload.length; /* FMT+SEQ+TYPE+CMD+PAYLOAD */
-    var total = 4 + bodyLen + 2;
+  /* 构造 App→云台帧（2026-10-01 ZY Play 抓包实锤布局）：
+   *   24 <DIR> <LEN:2B 小端> <FMT:2B> <inc> <flag> <cmd> <args…> <CRC16 小端> */
+  function buildFrame(dir, format, inc, flag, cmd, args) {
+    args = args || [];
+    var body = 2 + 1 + 1 + 1 + args.length; /* FMT+inc+flag+cmd+ARGS */
+    var total = 4 + body + 2;
     var out = new Uint8Array(total);
     out[0] = 0x24;
     out[1] = dir & 0xFF;
-    out[2] = bodyLen & 0xFF;                       /* LEN 小端：实测帧 24 3C 08 00 / 24 3E 0C 00 */
-    out[3] = (bodyLen >> 8) & 0xFF;
+    out[2] = body & 0xFF;                       /* LEN 小端：实测帧 24 3C 08 00 / 24 3E 0C 00 */
+    out[3] = (body >> 8) & 0xFF;
     out[4] = (format >> 8) & 0xFF;
     out[5] = format & 0xFF;
-    out[6] = (seq >> 8) & 0xFF;
-    out[7] = seq & 0xFF;
-    out[8] = type & 0xFF;
-    out[9] = cmd & 0xFF;
-    for (var i = 0; i < payload.length; i++) out[10 + i] = payload[i] & 0xFF;
-    var crc = crc16(out, 4, 10 + payload.length);
-    out[10 + payload.length] = crc & 0xFF;          /* 小端：低字节在前 */
-    out[11 + payload.length] = (crc >> 8) & 0xFF;
+    out[6] = inc & 0xFF;
+    out[7] = flag & 0xFF;
+    out[8] = cmd & 0xFF;
+    for (var i = 0; i < args.length; i++) out[9 + i] = args[i] & 0xFF;
+    var crc = crc16(out, 4, 9 + args.length);
+    out[9 + args.length] = crc & 0xFF;          /* 小端：低字节在前 */
+    out[10 + args.length] = (crc >> 8) & 0xFF;
     return out;
   }
 
@@ -138,30 +139,14 @@
     return frames;
   };
 
-  /* 官方 App 抓包实测的 app→gimbal 帧形（与本文件 buildFrame 的差异：序号只有 1 字节，后随固定 0x01）：
-   *   24 3C <LEN:2B> 18 12 <inc:1B> 01 <cmd> <data…> <CRC16 小端>
-   * 依据：petermaguire.xyz 抓包样例 24 3C 08 00 18 12 01 01 02 00 00 00 6F 76
-   * （本仓库 crc16 对 FMT..data 计算 = 0x766F 已验证）+ bleebil 客户端同形构造 */
+  /* 官方 App 抓包实测的 app→gimbal 帧（flag=0x01，参数常为 3 字节 NO_ARGUMENT）：
+   *   24 3C <LEN:2B 小端> 18 12 <inc> 01 <cmd> <data…> <CRC16 小端>
+   * 依据：ZY Play 抓包（logs/zyplay-cap1.txt）+ petermaguire.xyz 样例 24 3C 08 00 18 12 01 01 02 00 00 00 6F 76 */
   var officialInc = 0;
   function buildOfficialFrame(cmd, data) {
-    data = data || [0x00, 0x00, 0x00];   /* 官方帧的参数常为 3 字节（NO_ARGUMENT） */
+    data = data || [0x00, 0x00, 0x00];
     officialInc = (officialInc + 1) & 0xFF;
-    var body = 2 + 1 + 1 + 1 + data.length;   /* FMT + inc + 0x01 + cmd + data */
-    var out = new Uint8Array(4 + body + 2);
-    out[0] = 0x24;
-    out[1] = DIR_APP2G;
-    out[2] = body & 0xFF;                       /* LEN 小端（同实测抓包 24 3C 08 00） */
-    out[3] = (body >> 8) & 0xFF;
-    out[4] = 0x18;
-    out[5] = 0x12;
-    out[6] = officialInc;
-    out[7] = 0x01;
-    out[8] = cmd & 0xFF;
-    for (var i = 0; i < data.length; i++) out[9 + i] = data[i] & 0xFF;
-    var crc = crc16(out, 4, 9 + data.length);
-    out[9 + data.length] = crc & 0xFF;
-    out[10 + data.length] = (crc >> 8) & 0xFF;
-    return out;
+    return buildFrame(DIR_APP2G, FMT_CMD, officialInc, 0x01, cmd, data);
   }
   /* 会话层：发命令、心跳保活、帧/按键事件分发（含重复包去重） */
   function Client(writeFn, opts) {
@@ -169,19 +154,20 @@
     this.writeFn = writeFn;               /* function(ArrayBuffer) -> Promise */
     this.onFrame = opts.onFrame || null;  /* function(frame) */
     this.onButton = opts.onButton || null;
-    this.seq = (Math.random() * 0xFFFF) | 0;
+    this.seq = (Math.random() * 0xFF) | 0;
     this.parser = new Parser();
     this._lastSig = null;
     this._lastSigAt = 0;
     this._hbTimer = null;
   }
 
-  Client.prototype.send = function (cmd, payload, format) {
-    this.seq = (this.seq + 1) & 0xFFFF;
-    var frame = buildFrame(DIR_APP2G, format || FMT_CMD, this.seq, TYPE_CMD, cmd, payload);
+  Client.prototype.send = function (cmd, args, format) {
+    this.seq = (this.seq + 1) & 0xFF;
+    var frame = buildFrame(DIR_APP2G, format || FMT_CMD, this.seq, 0x01, cmd, args);
     return this.writeFn(frame.buffer);
   };
 
+  /* 非官方帧（官方 App 不发心跳），仅供探针实验 */
   Client.prototype.heartbeat = function () {
     return this.send(0x80, [0, 0, 0, 0, 0, 0], FMT_HB);
   };

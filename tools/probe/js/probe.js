@@ -303,7 +303,7 @@
       return;
     }
     if (k === '6' && S.client) {
-      S.client.send(0x06, []).then(function () { log('[OUT] 电量请求(0x06)已发'); })
+      S.client.send(0x06, [0x00, 0x00, 0x00]).then(function () { log('[OUT] 电量请求(0x06)已发'); })
         .catch(function (e2) { log('✗ 发送失败: ' + e2.message); });
       return;
     }

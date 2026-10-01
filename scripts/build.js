@@ -60,11 +60,24 @@ try {
     parsed[0].format === Z.FMT_HB && parsed[0].payload.length === 6,
     '真实心跳样例经 Parser 解析（crcOk、cmd=0x80）');
 
-  const f = Z.buildFrame(Z.DIR_G2APP, Z.FMT_CMD, 0x1234, Z.TYPE_RSP, 0x20, [0xC0, 0x3C, 0x00]);
+  const f = Z.buildOfficialFrame(0x20, [0xC0, 0x3C, 0x00]);
   const frames = new Z.Parser().push(f);
   check(frames.length === 1 && frames[0].cmd === 0x20 && frames[0].crcOk &&
     frames[0].payload[0] === 0xC0 && frames[0].payload[2] === 0x00,
     '帧编解码回环（按键帧 0x20 / c0 3c 00）');
+  check(frames[0].type === 0x01 && frames[0].format === Z.FMT_CMD,
+    '官方帧字段（flag=0x01, FMT=0x1812）');
+
+  /* 抓包回归：云台按键上报帧与初始化应答帧（ZY Play btsnoop 实录） */
+  const capBtn = new Uint8Array([0x24, 0x3C, 0x08, 0x00, 0x18, 0x12, 0x01, 0x10, 0x20, 0xC0, 0x3D, 0x00, 0x7C, 0x57]);
+  const cb = new Z.Parser().push(capBtn);
+  check(cb.length === 1 && cb[0].crcOk && cb[0].cmd === 0x20 && cb[0].type === 0x10 &&
+    cb[0].payload[0] === 0xC0 && cb[0].payload[1] === 0x3D,
+    '抓包按键帧解析（cmd=0x20 flag=0x10 c0 3d 00）');
+  let btnHits = 0;
+  const cli = new Z.Client(function () { return Promise.resolve(); }, { onButton: function () { btnHits++; } });
+  cli.feed(capBtn);
+  check(btnHits === 1, 'onButton 触发（cmd=0x20，忽略 dir=0x3C）');
 
   const p2 = new Z.Parser();
   const a = p2.push(f.subarray(0, 5));
