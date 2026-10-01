@@ -12,15 +12,18 @@
   /* 云台按键上报 → 动作（2026-10-01 真机实测键码，与 M2 说明书一致）：
    *   0x3D = 拍照/录像键【单击】→ 录像起停（App 里随当前模式=拍照/录像）
    *   0x3C = 拍照/录像键【双击】→ 拍照（官方协议里 App 让云台拍照用的就是 C0 3C 00）
-   *   0x18 = 变焦杆 T（上推）按下 → 手机数码变焦 +1 档（0x28 是释放，忽略）
-   *   0x17 = 变焦杆 W（下推）按下 → 手机数码变焦 −1 档（0x27 是释放，忽略）
+   *   变焦杆（左侧）：T 上推 = 0x18 按 / 0x28 松；W 下推 = 0x17 按 / 0x27 松
+   *     → 按住连续变焦、松开即停（短拨一下也至少走一档）
    *   M 键（模式）、扳机键实测不上报 BLE（纯本地动作）→ 无事件可映射 */
   var BUTTON_MAP = {
     0x3D: 'shutter',
     0x3C: 'photo',
     0x18: 'zoom-in',
-    0x17: 'zoom-out'
+    0x17: 'zoom-out',
+    0x28: 'zoom-stop',
+    0x27: 'zoom-stop'
   };
+  var ZOOM_HOLD_MS = 180;
 
   var APP_VERSION = 'v6';
   var GIMBAL_NAME_RE = /CRANE[-_ ]?M2/i;
@@ -39,6 +42,7 @@
     recSecs: 0,
     zoomRatios: [],
     zoomIdx: 0,
+    zoomHoldTimer: null,
     ecList: [],
     ecNow: 0,
     debugOn: false,
@@ -270,6 +274,7 @@
   function onDisconnected(reason) {
     dlog('云台断线' + (reason ? '(' + reason + ')' : '') + '，3s 后重连');
     stopPolling();
+    zoomHoldStop();
     if (state.client) state.client.stopHeartbeat();
     bt.disconnect(state.conn);
     state.conn = null;
@@ -405,9 +410,25 @@
     var action = code === null ? null : BUTTON_MAP[code];
     if (action === 'shutter') shutter();
     else if (action === 'photo') takePhoto();
-    else if (action === 'zoom-in') zoomStep(1);
-    else if (action === 'zoom-out') zoomStep(-1);
+    else if (action === 'zoom-in') zoomHoldStart(1);
+    else if (action === 'zoom-out') zoomHoldStart(-1);
+    else if (action === 'zoom-stop') zoomHoldStop();
     else if (action === 'mode') switchMode();
+  }
+
+  /* 连续变焦：按下启动（先立即走一档，再按周期）；松开即停；到顶/到底自动停 */
+  function zoomHoldStart(dir) {
+    zoomHoldStop();
+    zoomStep(dir);
+    state.zoomHoldTimer = root.setInterval(function () {
+      var before = state.zoomIdx;
+      zoomStep(dir);
+      if (state.zoomIdx === before) zoomHoldStop();
+    }, ZOOM_HOLD_MS);
+  }
+
+  function zoomHoldStop() {
+    if (state.zoomHoldTimer) { root.clearInterval(state.zoomHoldTimer); state.zoomHoldTimer = null; }
   }
 
   /* ---------- 快门 ---------- */
@@ -696,6 +717,7 @@
   /* 取景界面按返回键退出应用 */
   function exitApp() {
     stopPolling();
+    zoomHoldStop();
     if (state.client) state.client.stopHeartbeat();
     if (state.conn) bt.disconnect(state.conn);
     if (cam.recording) { cam.stopRecording(); stopRecTimer(); }
