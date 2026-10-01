@@ -48,16 +48,16 @@ node scripts/build.js
 
 ## 当前状态与风险
 
-- [x] 协议层：CRC16-XMODEM 与帧编解码通过 Weebill-S 实测样例自测（本地可验证）
-- [ ] 真机：2720 开发者模式连通、privileged 应用安装
-- [x] 真机：GATT 链路实测连通（2026-10-01：FEE9 过滤扫描 → `type=le`/`gatt` 非空 → `connect()`/`discoverServices()` 成功 → fee9 + 129600 写/129601 通知特征齐全；不需要配对）
-- [ ] 真机：探针捕获 M2 按键字节（**剩余 go/no-go 门槛**）
-- [ ] 真机：相机取景/拍照/录像与参数
+- [x] 协议层：CRC16-XMODEM 与帧编解码通过 Weebill-S 样例 + ZY Play 抓包回归（`scripts/build.js` 自测）
+- [x] 真机：2720 开发者模式连通、privileged 应用安装
+- [x] 真机：GATT 链路实测连通（FEE9 过滤扫描 → `connect()`/`discoverServices()` → fee9 + 129600 写/129601 通知；不需要配对）
+- [x] 真机：云台按键全链路（单击 `0x3D`=录像起停、双击 `0x3C`=拍照、变焦杆 T/W 按住连续变焦；接收=100ms 轮询 `.value`）
+- [x] 真机：相机取景/拍照/录像与参数（取景 320×240、白平衡、数码变焦 2×、曝光补偿、照片 1600×1200 已验证）
 
-已知风险（均有对策，详见 docs/）：
+已知风险与对策（详见 docs/）：
 
-1. **M2 协议与 Weebill-S 有差异（约 20% 概率）** → 探针实测为准，字节写在 `BUTTON_MAP`，只改映射不改架构。
-2. **KaiOS 实机 GATT 通知可能不触发**（kaios.dev 实测结论；2026-10-01 本机 GATT 连接/服务发现已通过）。注意：M2 的通知特征（…129601）声明为**不可读**（无 READ 位），`readValue` 会被栈直接拒绝（`ReadValue: GATT_CHAR_PROP_BIT_READ failed`），**轮询不可能拿到数据**——接收完全依赖 notify。现已内置抓字段手段：连接后应用会打印 `notify: props=… cccd=…`（若 `startNotifications` 是空壳则**自动手动写 0x2902** 并回报结果），收到任何字节都会打 `[IN#n] 24 3E …` 原始帧。早期"100ms 轮询兜底"曾因连错 4 次误判断线造成 400ms 重连死循环，已修。
+1. **KaiOS 不派发 GATT 通知事件**（本机实测）→ 接收改为 100ms 轮询特征对象 `.value`（本地缓存读；通知值会同步进来）；`readValue()` 对通知特征必败（无 READ 位）。实现见 `app/js/session.js`，实测表见 `docs/protocol.md`。
+2. **云台状态字节 ↔ 模式名（PF/L/POV）尚未映射** → 应用每 5s 用官方 `0x1817` 查状态并记录状态字节变化；按 M 键切模式时对照面板日志即可完成映射。
 3. **2720 的 2MP 相机 HAL 参数不全** → 参数菜单按 `capabilities` 动态生成，缺的自动隐藏，不影响快门功能。
 4. **固件无中文字形** → 把 `app/js/strings.js` 的 `LANG` 改为 `'en'`。
 

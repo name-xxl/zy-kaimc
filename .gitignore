@@ -4,3 +4,4 @@ dist/
 logs/
 app-web/
 node_modules/
+__pycache__/

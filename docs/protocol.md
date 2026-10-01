@@ -95,3 +95,23 @@ CRC  CRC16/XMODEM（init 0x0000，poly 0x1021），对 FMT..ARGS 计算，小端
 
 > 填完后把按键字节同步到 `app/js/main.js` 的 `BUTTON_MAP`（cmd → 动作），
 > 若帧结构与上不同，改 `app/js/zhiyun.js` 的帧解析参数即可。
+
+## App 模块职责（低耦合分层）
+
+```
+app/js/
+  config.js    时序/帧常量/键码/DEBUG 开关（app 与探针共享）★
+  util.js      DOM/Promise/hex 小工具
+  strings.js   文案（zh/en）
+  ui.js        软键/HUD/toast/参数菜单
+  ble.js       BLE 传输层 KaiBt（适配器/扫描/连接/CCCD 订阅/写特征）★
+  session.js   云台会话层 KaiSession（连接→订阅→官方初始化序列→轮询 .value→状态回调）★
+  buttons.js   键码→动作分发（动作由 main 注入）★
+  zhiyun.js    协议编解码（帧/CRC/Parser/Client）★
+  camera.js    相机 HAL 封装
+  main.js      编排：相机 + UI/键位 + 会话 + 按键
+tools/probe/   探针（复用 ★ 共享层，仅剩 UI 与诊断键）
+```
+
+分工原则：`main.js` 不碰 BLE 细节；`session.js` 不碰 UI/相机；`buttons.js` 不依赖具体动作实现。
+★ 的文件由 `scripts/build.js` 逐字节同步到 `tools/probe/js/`（改完跑一次 build 即保证两份一致）。

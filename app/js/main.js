@@ -14,7 +14,7 @@
   /* 本文件只做编排：相机 + UI/键位 + 云台会话(KaiSession) + 按键分发(KaiButtons)。
    * 键码与时序常量见 config.js（AppCfg.KEY / AppCfg.*_MS） */
 
-  var APP_VERSION = 'v6';
+  var APP_VERSION = 'v7';
   var GIMBAL_NAME_RE = /CRANE[-_ ]?M2/i;
 
   var state = {
