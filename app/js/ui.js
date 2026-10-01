@@ -27,8 +27,8 @@
     if ('ble' in o) U.setText('hud-ble', o.ble);
     if ('mode' in o) U.setText('hud-mode', o.mode);
     if ('rec' in o) { U.setText('hud-rec', o.rec); U.show('hud-rec', !!o.rec); }
-    if ('param' in o) U.setText('hud-param', o.param);
-    if ('zoom' in o) U.setText('hud-zoom', o.zoom);
+    if ('param' in o) { U.setText('hud-param', o.param); U.show('hud-param', !!o.param); }
+    if ('zoom' in o) { U.setText('hud-zoom', o.zoom); U.show('hud-zoom', !!o.zoom); }
   };
 
   UI.toast = function (msg, ms) {

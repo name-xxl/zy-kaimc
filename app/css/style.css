@@ -23,7 +23,7 @@ html, body {
 }
 #hud-bottom {
   position: absolute; bottom: 0; left: 0; right: 0;
-  display: flex; justify-content: space-between;
+  display: flex; justify-content: space-between; align-items: flex-end;
   padding: 3px; font-size: 12px;
 }
 #hud-top span, #hud-bottom span {
@@ -35,6 +35,15 @@ html, body {
   text-overflow: ellipsis;
   max-width: 60%;
 }
+/* 参数栏：占满左侧剩余宽度并允许折行（内容多时不再被省略号截断）；右侧版本/变焦保持一行。
+ * keep-all：中文标签不拦腰断行，折行只发生在 " · " 分隔处 */
+#hud-bottom #hud-param {
+  flex: 1 1 auto; max-width: none;
+  white-space: normal; overflow: visible; text-overflow: clip;
+  line-height: 1.45; text-align: left;
+  word-break: keep-all; overflow-wrap: break-word;
+}
+#hud-bottom #hud-zoom { flex: 0 0 auto; margin-left: 4px; }
 #hud-rec { color: #ff5252; font-weight: bold; }
 
 #debug {

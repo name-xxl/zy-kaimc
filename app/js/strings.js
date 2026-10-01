@@ -43,6 +43,9 @@
       pProfile: '录像规格',
       pZoom: '变焦',
       gimbalBatt: '云台',
+      hudWb: '白平衡',
+      hudIso: 'ISO',
+      hudEc: '曝光',
       sizeFmt: '尺寸'
     },
     en: {
@@ -83,6 +86,9 @@
       pProfile: 'Rec profile',
       pZoom: 'Zoom',
       gimbalBatt: 'Gimbal',
+      hudWb: 'WB',
+      hudIso: 'ISO',
+      hudEc: 'EV',
       sizeFmt: 'Size'
     }
   };

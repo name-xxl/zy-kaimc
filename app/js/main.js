@@ -15,7 +15,7 @@
   /* 本文件只做编排：相机 + UI/键位 + 云台会话(KaiSession) + 按键分发(KaiButtons)。
    * 键码与时序常量见 config.js（AppCfg.KEY / AppCfg.*_MS） */
 
-  var APP_VERSION = 'v7.2';
+  var APP_VERSION = 'v7.3';
   var GIMBAL_NAME_RE = /CRANE[-_ ]?M2/i;
 
   var state = {
@@ -512,23 +512,31 @@
 
   function renderHudParams() {
     var caps = cam.capabilities();
+    var NB = '\u00A0';   /* 标签与取值之间用不换行空格：折行只发生在 · 分隔处 */
     var parts = [];
     if (caps.whiteBalanceModes.length) {
       var wb = cam.getParam('whiteBalance');
-      if (wb !== undefined && wb !== null) parts.push('WB:' + tval(wb));
+      if (wb !== undefined && wb !== null) parts.push(t('hudWb') + NB + tval(wb));
     }
     if (caps.isoModes.length) {
       var iso = cam.getParam('iso');
-      if (iso !== undefined && iso !== null) parts.push('ISO:' + tval(iso));
+      if (iso !== undefined && iso !== null) parts.push(t('hudIso') + NB + tval(iso));
     }
     if (state.ecList.length) {
-      parts.push('EC:' + (state.ecNow > 0 ? '+' : '') + state.ecNow);
+      parts.push(t('hudEc') + NB + fmtEc(state.ecNow));
     }
-    if (state.gimbalBatt !== null) parts.push(t('gimbalBatt') + ' ' + state.gimbalBatt + '%');
+    if (state.gimbalBatt !== null) parts.push(t('gimbalBatt') + NB + state.gimbalBatt + '%');
     UI.hud({
-      param: parts.join('  '),
+      param: parts.join(' · '),
       zoom: ((state.zoomRatios.length > 1 ? ('×' + state.zoomRatios[state.zoomIdx]) : '') + ' ' + APP_VERSION).trim()
     });
+  }
+
+  /* 曝光补偿显示：最多两位小数并去掉尾零（0.5 → +0.5，-1 → -1），避免浮点长串 */
+  function fmtEc(v) {
+    var n = Math.round(Number(v) * 100) / 100;
+    var s = String(n).replace(/(\.\d*?)0+$/, '$1').replace(/\.$/, '');
+    return (n > 0 ? '+' : '') + s;
   }
 
   /* ---------- 参数菜单 ---------- */
@@ -591,7 +599,7 @@
     if (state.ecList.length) {
       var ecItem = {
         label: t('pEc'),
-        valueText: (state.ecNow > 0 ? '+' : '') + state.ecNow,
+        valueText: fmtEc(state.ecNow),
         cycle: function (d) {
           var idx = state.ecList.indexOf(state.ecNow);
           if (idx === -1) idx = state.ecList.indexOf(0);
@@ -599,7 +607,7 @@
           idx = (idx + d + state.ecList.length) % state.ecList.length;
           state.ecNow = state.ecList[idx];
           cam.setParam('ec', state.ecNow);
-          ecItem.valueText = (state.ecNow > 0 ? '+' : '') + state.ecNow;
+          ecItem.valueText = fmtEc(state.ecNow);
           UI.refreshMenu();
         }
       };
