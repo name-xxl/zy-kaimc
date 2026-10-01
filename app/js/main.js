@@ -249,20 +249,26 @@
     state.lastPollVal = null;
     var canRead = canReadChar(state.conn.notifyChar);
     if (!canRead) dlog('通知特征不可读：跳过 POLL，接收靠 notify');
+    var readErrs = 0;
     state.pollTimer = root.setInterval(function () {
       var con = state.conn;
       if (!con || !con.notifyChar) return;
       if (linkDown(con.gatt)) { onDisconnected('链路断开'); return; }
       if (!canRead) return;
       U.prom(con.notifyChar.readValue(), 'readValue').then(function () {
+        readErrs = 0;
         var v = new Uint8Array(con.notifyChar.value || []);
         if (v.length && (!state.lastPollVal || !bytesEqual(state.lastPollVal, v))) {
           state.lastPollVal = new Uint8Array(v);
           state.client.feed(v);
         }
       }).catch(function () {
-        /* 读失败不再直接断线（多为永久性的属性/权限错误），交由链路状态判定 */
-        if (linkDown(con.gatt)) onDisconnected('链路断开');
+        /* 读失败不再直接断线；连着 2 次失败说明该特征根本不可读（本机不暴露 properties 位），关掉 POLL */
+        if (linkDown(con.gatt)) { onDisconnected('链路断开'); return; }
+        if (++readErrs >= 2) {
+          stopPolling();
+          dlog('POLL 关闭（特征不可读），接收靠 notify');
+        }
       });
     }, 100);
   }
