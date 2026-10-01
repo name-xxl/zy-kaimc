@@ -98,7 +98,8 @@ M2 = **3×18650 串联**（标称 11.1V / 满 12.6V / 最低 9.8V），故 10.4~
 
 ## 云鹤 M2 实测（装 zy-probe 探针后填写）
 
-探针操作：连接后依次按云台按键，记录 `[IN]` / `[POLL]` 行字节；按 `5` 发心跳、`6` 请求电量、`*` 开关自动心跳。
+探针操作：连接后依次按云台按键，记录 `[IN]` / `[POLL]` 行字节；按 `5` 发心跳、`6` 请求电量、`*` 开关自动心跳；
+屏幕按键：↑ 翻日志、左软键重扫、右软键清屏。
 
 - [x] service 是否为 fee9，特征对 UUID 是否一致：**是**（2026-10-01 实机 bt-diag：发现服务 1801/1800/fee9；fee9 下 `d44bc439-…-129600`（写）与 `…-129601`（通知），与 Weebill-S 一致）
 - [x] notify 事件是否触发：**是**。CCCD 需手动写（`startNotifications()` 是空壳，不写 0x2902）；2026-10-01 抓包确认云台以 notify 主动上报应答与按键
@@ -114,25 +115,29 @@ M2 = **3×18650 串联**（标称 11.1V / 满 12.6V / 最低 9.8V），故 10.4~
 
 抓包日期 / 云台固件版本：
 
-> 填完后把按键字节同步到 `app/js/main.js` 的 `BUTTON_MAP`（cmd → 动作），
+> 填完后把按键字节同步到 `app/js/config.js` 的 `AppCfg.KEY`（键码 → 语义），
 > 若帧结构与上不同，改 `app/js/zhiyun.js` 的帧解析参数即可。
 
 ## App 模块职责（低耦合分层）
 
 ```
 app/js/
-  config.js    时序/帧常量/键码/DEBUG 开关（app 与探针共享）★
+  config.js    时序/帧常量/键码/模式表/电量曲线/DEBUG 开关（app 与探针共享）★
   util.js      DOM/Promise/hex 小工具
-  strings.js   文案（zh/en）
-  ui.js        软键/HUD/toast/参数菜单
+  format.js    纯格式/换算：时间、曝光补偿、电量、文件名（无 DOM 依赖，可单测）
+  strings.js   文案（zh/en）+ HAL 取值汉化
+  ui.js        软键/HUD/toast/中央提示块/菜单渲染/关于页
+  zhiyun.js    协议编解码（帧/CRC/Parser/Client）★
   ble.js       BLE 传输层 KaiBt（适配器/扫描/连接/CCCD 订阅/写特征）★
   session.js   云台会话层 KaiSession（连接→订阅→官方初始化序列→轮询 .value→状态回调）★
   buttons.js   键码→动作分发（动作由 main 注入）★
-  zhiyun.js    协议编解码（帧/CRC/Parser/Client）★
-  camera.js    相机 HAL 封装
-  main.js      编排：相机 + UI/键位 + 会话 + 按键
+  camera.js    相机 HAL 封装（含 release()/setMode() 生命周期 API）
+  grid.js      构图辅助线（关/九宫格/黄金分割/中心十字/对角线，localStorage 持久化）
+  debug.js     屏幕调试面板（环形日志 / # 开关 / ↑↓ 翻页，最新在最上面）
+  menu.js      参数菜单（HAL 参数 + 拍摄设置 + 辅助线 + 关于入口；不持有应用状态）
+  main.js      编排：启动、云台链路、拍摄动作、键盘分发
 tools/probe/   探针（复用 ★ 共享层，仅剩 UI 与诊断键）
 ```
 
-分工原则：`main.js` 不碰 BLE 细节；`session.js` 不碰 UI/相机；`buttons.js` 不依赖具体动作实现。
+分工原则：`main.js` 不碰 BLE 细节；`session.js` 不碰 UI/相机；`menu.js` 不持有应用状态（由 main 传上下文）；`buttons.js` 不依赖具体动作实现。
 ★ 的文件由 `scripts/build.js` 逐字节同步到 `tools/probe/js/`（改完跑一次 build 即保证两份一致）。

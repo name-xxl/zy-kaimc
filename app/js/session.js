@@ -99,7 +99,7 @@
     return this.client.send(cmd, args);
   };
 
-  /* 发原始字节帧（如 FRAME_1818 / FRAME_1817）；quiet=true 时不打 TX 日志（周期查询用） */
+  /* 发原始字节帧（如 FRAME_1818 会话帧 / FRAME_MODE_QUERY 模式查询）；quiet=true 时不打 TX 日志 */
   Session.prototype.sendRaw = function (bytes, quiet) {
     var self = this;
     if (!this.conn) return Promise.reject(new Error('未连接'));

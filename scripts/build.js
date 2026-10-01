@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-/* 构建：语法检查 → manifest 校验 → 协议自测 → 同步共享 JS 到探针 → 打包 zip。
+/* 构建：语法检查 → manifest 校验 → 悬空成员/i18n/HTML 脚本图检查 → 协议自测
+ * → 共享 JS 漂移检查与同步 → 单元/会话测试 → 版本一致性 → 打包 zip。
  * 纯 Node，无第三方依赖。zip 用 Windows 自带 bsdtar（条目名为正斜杠）。 */
 'use strict';
 const { execFileSync } = require('child_process');

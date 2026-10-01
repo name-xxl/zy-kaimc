@@ -15,7 +15,7 @@ Nokia 2720 Flip（KaiOS 2.5，旧固件 build 22-）上的 privileged 应用：�
 app/            主应用（manifest type=privileged；权限 bluetooth / camera / device-storage）
 tools/probe/    BLE 探针应用（先装它：枚举云台 GATT、监听并显示按键原始字节）
 docs/           install-2720.md 装机指南；protocol.md 协议笔记（实测数据填这里）
-scripts/        build.js（语法检查 + 协议自测 + 打包 zip）、make-icons.js
+scripts/        build.js（一键：各项自检 + 单元/会话测试 + 打包）、test-units.js、test-session.js、make-icons.js、rdd*.js 等真机工具
 CHANGELOG.md    版本历史（与 Releases 对应）
 dist/           构建产物 zy-kaimc.zip / zy-probe.zip
 ```
@@ -96,10 +96,10 @@ node scripts/test-session.js   # 会话层仿真回归（假适配器，不碰�
    查询节奏是**自适应**的：空闲 5s（`MODE_QUERY_MS`），一收到云台按键（说明人在操作）就压到 1s（`MODE_QUERY_FAST_MS`）并持续 30s（`MODE_FAST_TAIL_MS`）——M 键/扳机不上报，模式只能靠问，这个节奏是实时性与开销的折中（多发几个 14 字节包，每天不到 1 mAh）。
 3. **云台待机（休眠）时 BLE 链路仍在，但对任何命令都不应答**（2026-10-02 实测：16s 内 0 回包，含模式与电量查询）→ App 用"连续无应答"判定（门限 = 2 个查询周期 + 3s），状态行显示 **「云台无应答」** 而不是休眠前的缓存电量/模式；唤醒后首个回包自动恢复。
 4. **后台降级**：应用不可见（切走/息屏）时停掉周期查询、收包轮询从 100ms 放宽到 `POLL_HIDDEN_MS`(500ms)；回前台自动恢复。
-3. **2720 的 2MP 相机 HAL 参数不全** → 参数菜单按 `capabilities` 动态生成，缺的自动隐藏，不影响快门功能。
+5. **2720 的 2MP 相机 HAL 参数不全** → 参数菜单按 `capabilities` 动态生成，缺的自动隐藏，不影响快门功能。
    拍摄上限同样由 HAL 决定：**录像最高 720×480**（`recorderProfiles` 最高档，高/默认/480p 全是它）、**拍照最高 1600×1200（2MP）**、**预览最高 1280×720**。720p/1080p 录像做不了：系统录像 API 没有该档位；唯一旁路是从 1280×720 预览流用 `MediaRecorder`（本机支持 `video/mp4;codecs=avc1`）录制，但它**不写旋转矩阵**，而 KaiOS 播放器对 `.mp4` 又不认矩阵 → 文件会横躺，故不做（2026-10-02 结论）。
-4. **固件无中文字形** → 把 `app/js/strings.js` 的 `LANG` 改为 `'en'`。
-5. **本机没有运动传感器**（内核输入设备只有 matrix_keypad/hall_sensor1/qpnp_pon/gpio-keys，无 accel/gyro/compass，`dumpsys sensorservice` 也空）→ **电子水平仪做不了**（`DeviceMotionEvent` 只是 Gecko 的 API 外壳，没有硬件就永不派发事件）；云台自身姿态又未逆向出上报帧，所以这条路到此为止（2026-10-02 结论）。
+6. **固件无中文字形** → 把 `app/js/strings.js` 的 `LANG` 改为 `'en'`。
+7. **本机没有运动传感器**（内核输入设备只有 matrix_keypad/hall_sensor1/qpnp_pon/gpio-keys，无 accel/gyro/compass，`dumpsys sensorservice` 也空）→ **电子水平仪做不了**（`DeviceMotionEvent` 只是 Gecko 的 API 外壳，没有硬件就永不派发事件）；云台自身姿态又未逆向出上报帧，所以这条路到此为止（2026-10-02 结论）。
 
 ## KaiOS 相机旋转三层模型（2720 实测定论）
 
