@@ -68,5 +68,5 @@ node scripts/build.js
 | 录像 | 编码帧恒为横向原始帧（固件不烤像素旋转）；tkhd 矩阵 = (传入 rotation + sensorAngle) mod 360 = 270°；`setConfiguration` 不带 rotation（Gaia 从不传）；`startRecording` 的 rotation 只传屏幕方向角（竖屏锁定 = 0） |
 | 播放 | `.3gp`：播放器遵守 tkhd 矩阵 → 正立；`.mp4`：忽略矩阵 → 横放。**因此录像固定存 `.3gp`**；竖屏小窗横条为平台行为（系统相机文件同样如此），观看用「全屏」 |
 
-⚠ 前提：录制前必须 `screen.orientation.lock('portrait')`（App 已内置于启动/快门/录像流程），否则矩阵错乱。
+⚠ 矩阵与屏幕方向锁**无关**（VID_rot0 实证：rotation:0 恒得 270° 矩阵）；lockPortrait 仅作竖屏 UI 方向稳定保险保留。
 ⚠ 调试注意：ffmpeg/PotPlayer 抽帧与播放会自动应用旋转矩阵——「抽出来的帧是正立的」不代表像素烤入了旋转，判断帧方向务必加 `-noautorotate`。
