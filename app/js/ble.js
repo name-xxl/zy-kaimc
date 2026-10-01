@@ -160,7 +160,7 @@
       }
       if (list.length && tag.indexOf(' ') === -1) tag += ' noMatch';
       throw new Error('设备没有 GATT 接口(' + hint + ' paired=' + tag +
-        ')，可在系统蓝牙设置配对云台后重试');
+        ')。云台是 BLE-only，系统设置搜不到，用探针按 8 程序配对后重试');
     });
   };
 

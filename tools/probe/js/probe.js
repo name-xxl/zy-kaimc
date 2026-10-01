@@ -232,11 +232,28 @@
       for (var i = 0; i < list.length; i++) {
         if (list[i] && /CRANE|M2/i.test(list[i].name || '')) { hit = list[i]; break; }
       }
-      if (!hit) log('★ 云台未配对：系统蓝牙设置里配对 CRANE-M2 后再按 7');
+      if (!hit) log('★ 云台未配对：↑↓ 选中扫描列表里的 ★ 设备按 8 程序配对');
       else if (hit.gatt) log('★ 已配对云台有 gatt！说明配对记录路线可通，重装主应用连即可');
       else log('★ 云台已配对但仍无 gatt → 这版固件没有暴露任何 GATT 入口，需升级固件');
     }).catch(function (e) {
       log('✗ getPairedDevices 失败: ' + e.message);
+    });
+  }
+
+  /* 对 LE 扫描地址直接发起系统配对（按 8）。
+   * 云台是 BLE-only，系统蓝牙设置搜的是经典蓝牙，永远搜不到——只能程序配 */
+  function pairSelected() {
+    var addr = S.order[S.sel];
+    var d = addr && S.devices[addr];
+    if (!d) { log('✗ 先 ↑/↓ 选中扫描到的设备，再按 8 配对'); return; }
+    var a = bt.adapter;
+    if (!a || typeof a.pair !== 'function') { log('✗ 固件无 adapter.pair()'); return; }
+    log('pair(' + d.address + ') …');
+    U.prom(a.pair(d.address), 'pair').then(function () {
+      log('✓ 配对成功！按 7 查配对记录有没有 gatt');
+    }).catch(function (e) {
+      log('✗ 配对失败: ' + ((e && (e.message || e.name)) || e) +
+        '（栈多半不支持对 LE 设备配对）');
     });
   }
 
@@ -264,6 +281,7 @@
     }
     if (k === '*') { toggleHeartbeat(); return; }
     if (k === '7') { deepDump(); return; }
+    if (k === '8') { pairSelected(); return; }
     if (k === 'Backspace') {
       e.preventDefault();
       cleanup();
@@ -284,6 +302,7 @@
     log('2) 等待扫描列出 CRANE-M2-XXXX（★ 标记）');
     log('3) ↑/↓ 选中 → 按 OK 连接');
     log('4) 按云台按键，把 [IN] 行字节抄到 docs/protocol.md');
+    log('连不上云台时：8=程序配对（选中后按） 7=查固件 API');
     bt.init().then(function () {
       return bt.ensureEnabled();
     }).then(function () {
