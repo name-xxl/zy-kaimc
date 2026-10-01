@@ -168,13 +168,15 @@
    * 官方文档 gatt 对 classic/unknown 类型设备返回 null，扫描记录可能尚未归类为 LE */
   Bt.prototype.acquireGatt = function (device) {
     var self = this;
-    if (device.gatt) return Promise.resolve(device.gatt);
-    var hint = describeDevice(device);
-    if (typeof device.fetchUuids !== 'function') return self.gattFromPaired(device, hint);
-    return U.prom(device.fetchUuids(), 'fetchUuids').catch(function () { /* 刷新失败继续兜底 */ })
+    /* startScan 给上层的是 {address,name,rssi,device} 包装，真 BluetoothDevice 在 .device 里 */
+    var dev = device && device.device && device.device.gatt !== undefined ? device.device : device;
+    if (dev.gatt) return Promise.resolve(dev.gatt);
+    var hint = describeDevice(dev);
+    if (typeof dev.fetchUuids !== 'function') return self.gattFromPaired(dev, hint);
+    return U.prom(dev.fetchUuids(), 'fetchUuids').catch(function () { /* 刷新失败继续兜底 */ })
       .then(function () {
-        if (device.gatt) return device.gatt;
-        return self.gattFromPaired(device, hint);
+        if (dev.gatt) return dev.gatt;
+        return self.gattFromPaired(dev, hint);
       });
   };
 

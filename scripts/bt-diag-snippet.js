@@ -25,6 +25,12 @@
     });
   }
   var FEE9 = ['0000fee9-0000-1000-8000-00805f9b34fb'];
+  /* pair() may pop a PIN dialog and pend forever; add timeout so the chain never stalls */
+  function t(p, ms) {
+    return Promise.race([p, new Promise(function (res) {
+      setTimeout(function () { res('__timeout__'); }, ms);
+    })]);
+  }
   try {
     var M = navigator.mozBluetooth;
     L('host ' + location.href);
@@ -66,10 +72,12 @@
       var step;
       if (typeof window.__btAdapter.pair === 'function') {
         L('-- adapter.pair --');
-        step = toP(window.__btAdapter.pair(d.address)).then(
-          function () { L('OK pair success'); },
-          function (e) { L('FAIL pair: ' + ((e && (e.message || e.name)) || e)); }
-        );
+        step = t(toP(window.__btAdapter.pair(d.address)), 25000).then(function (r) {
+          if (r === '__timeout__') { L('TIMEOUT pair 25s (PIN dialog waiting? confirm on screen)'); return; }
+          L('OK pair success');
+        }, function (e) {
+          L('FAIL pair: ' + ((e && (e.message || e.name)) || e));
+        });
       } else {
         L('FAIL no adapter.pair in firmware');
         step = Promise.resolve();
@@ -79,7 +87,8 @@
           L('FAIL no getPairedDevices');
           return null;
         }
-        return toP(window.__btAdapter.getPairedDevices()).then(function (list) {
+        return t(toP(window.__btAdapter.getPairedDevices()), 15000).then(function (list) {
+          if (list === '__timeout__') { L('TIMEOUT getPairedDevices 15s'); return null; }
           list = list || [];
           L('paired devices: ' + list.length);
           var hit = null;
@@ -91,16 +100,18 @@
           return hit;
         });
       }).then(function (hit) {
+        var via = (hit && hit.gatt) ? 'paired record' : 'scan object';
         var gatt = (hit && hit.gatt) || window.__btDev.gatt;
         if (!gatt) {
           L('VERDICT: neither scan object nor paired record has gatt - this firmware exposes NO GATT entry, firmware upgrade required');
           D.stage = 'done';
           return;
         }
-        L('-- gatt.connect() --');
-        return toP(gatt.connect()).then(function () {
+        L('-- gatt.connect() via ' + via + ' --');
+        return t(toP(gatt.connect()), 20000).then(function (r) {
+          if (r === '__timeout__') throw new Error('gatt.connect timeout 20s');
           L('OK gatt.connect success');
-          return toP(gatt.discoverServices()).catch(function () { L('discoverServices failed (continue)'); });
+          return t(toP(gatt.discoverServices()), 15000).catch(function () { L('discoverServices failed (continue)'); });
         }).then(function () {
           var svcs = gatt.services || [];
           L('services: ' + svcs.length);
@@ -109,7 +120,7 @@
             (s.characteristics || []).forEach(function (c) { L('  CHR ' + c.uuid); });
           });
           try { gatt.disconnect(); } catch (e) { /* already off */ }
-          L('VERDICT: GATT link WORKS via paired record - reinstall main app and it will connect');
+          L('VERDICT: GATT link WORKS via ' + via + ' - reinstall main app and it will connect');
           D.stage = 'done';
         });
       });
