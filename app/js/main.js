@@ -224,17 +224,6 @@
     });
   }
 
-  /* 通知特征大多没有 READ 属性；对它 readValue 会被 Gecko 直接拒绝
-   * （ReadValue: BT_ENSURE_TRUE_REJECT(mProperties & GATT_CHAR_PROP_BIT_READ) failed），
-   * 旧逻辑连错 4 次（约 400ms）就判"断线"→ 连接后必然立刻重连的死循环。
-   * GATT_CHAR_PROP_BIT_READ = 0x02 */
-  function canReadChar(ch) {
-    try {
-      if (typeof ch.properties === 'number') return (ch.properties & 0x02) !== 0;
-    } catch (e) { /* 无 properties 属性 */ }
-    return true; /* 拿不到属性时维持旧行为 */
-  }
-
   /* 链路是否已断：connected / connectionState 两个口径都试（不同固件暴露不同） */
   function linkDown(gatt) {
     try { if (gatt.connected === false) return true; } catch (e) { /* 无该属性 */ }
@@ -245,32 +234,24 @@
     return false;
   }
 
+  /* 接收靠"轮询 .value"——2026-10-01 真机实测（假云台对照实验）：
+   * 1) startNotifications() 不写 CCCD，也不会派发任何 JS 事件；
+   * 2) 手动写 CCCD 0x2902=0001 后云台会推送，通知值确实同步进特征对象的 .value（本地缓存）；
+   * 3) 但 oncharacteristicchanged / addEventListener 永远不触发。
+   * 所以：轮询 .value（本地读、无 ATT 往返）→ 差分 → 喂协议层。实测 1s 内必到，100ms 轮询足够 */
   function startPolling() {
     stopPolling();
     state.lastPollVal = null;
-    var canRead = canReadChar(state.conn.notifyChar);
-    if (!canRead) dlog('通知特征不可读：跳过 POLL，接收靠 notify');
-    var readErrs = 0;
     state.pollTimer = root.setInterval(function () {
       var con = state.conn;
       if (!con || !con.notifyChar) return;
       if (linkDown(con.gatt)) { onDisconnected('链路断开'); return; }
-      if (!canRead) return;
-      U.prom(con.notifyChar.readValue(), 'readValue').then(function () {
-        readErrs = 0;
-        var v = new Uint8Array(con.notifyChar.value || []);
-        if (v.length && (!state.lastPollVal || !bytesEqual(state.lastPollVal, v))) {
-          state.lastPollVal = new Uint8Array(v);
-          state.client.feed(v);
-        }
-      }).catch(function () {
-        /* 读失败不再直接断线；连着 2 次失败说明该特征根本不可读（本机不暴露 properties 位），关掉 POLL */
-        if (linkDown(con.gatt)) { onDisconnected('链路断开'); return; }
-        if (++readErrs >= 2) {
-          stopPolling();
-          dlog('POLL 关闭（特征不可读），接收靠 notify');
-        }
-      });
+      var v;
+      try { v = new Uint8Array(con.notifyChar.value || []); } catch (e) { return; }
+      if (!v.length) return;
+      if (state.lastPollVal && bytesEqual(state.lastPollVal, v)) return;
+      state.lastPollVal = v;
+      state.client.feed(v);
     }, 100);
   }
 

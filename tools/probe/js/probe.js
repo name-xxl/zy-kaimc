@@ -169,30 +169,25 @@
     return true;
   }
 
-  /* 轮询兜底：100ms 读 fee9 里可读的特征，变化才上报。
-   * 云台把通知特征声明为不可读，对它读会被 Gecko 直接拒绝、徒增日志且永远无数据 */
+  /* 轮询兜底：100ms 读 .value（本地缓存，KaiOS 实测：通知不派发事件但会同步 .value），变化才上报 */
   function startPoll() {
     if (S.pollTimer) root.clearInterval(S.pollTimer);
-    var chars = (S.conn && S.conn.fee9 && S.conn.fee9.characteristics) || [];
-    var readable = chars.filter(canRead);
-    if (chars.length && !readable.length) {
-      log('fee9 特征都不可读：POLL 永远无数据，接收只能看 [IN/NOTIFY] 行');
-    }
+    var fee9 = S.conn && S.conn.fee9;
+    var chars = (fee9 && fee9.characteristics) || [];
     S.pollTimer = root.setInterval(function () {
       var con = S.conn;
       if (!con) return;
       if (con.gatt.connected === false) { log('✗ GATT 断开'); cleanup(); return; }
-      readable.forEach(function (c) {
-        U.prom(c.readValue()).then(function () {
-          var v = new Uint8Array(c.value || []);
-          if (!v.length) return;
-          var prev = S.lastVals[c.uuid];
-          if (prev && !eq(prev, v)) {
-            log('[POLL] ' + shortUuid(c.uuid) + ': ' + U.hex(v));
-            if (S.client) S.client.feed(v);
-          }
-          if (!prev || !eq(prev, v)) S.lastVals[c.uuid] = v;
-        }).catch(function () { /* 不可读 */ });
+      chars.forEach(function (c) {
+        var v;
+        try { v = new Uint8Array(c.value || []); } catch (e) { return; }
+        if (!v.length) return;
+        var prev = S.lastVals[c.uuid];
+        if (prev && !eq(prev, v)) {
+          log('[POLL] ' + shortUuid(c.uuid) + ': ' + U.hex(v));
+          if (S.client) S.client.feed(v);
+        }
+        if (!prev || !eq(prev, v)) S.lastVals[c.uuid] = v;
       });
     }, 100);
   }
