@@ -48,7 +48,10 @@ function listJs(dir) {
  * （专治"函数被删、调用还在"——历史上 U.withTimeout 被误删导致相机卡启动中） */
 (function danglingMembers() {
   const readSrc = (rel) => fs.readFileSync(path.join(rootDir, rel), 'utf8');
-  const strip = (s) => s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
+  /* 注释剥离但保持索引对齐（注释里的换行换成空行），这样行号能直接算准 */
+  const strip = (s) => s
+    .replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, ' '))
+    .replace(/\/\/[^\n]*/g, (m) => ' '.repeat(m.length));
   function namesOf(re, src) {
     const out = new Set();
     let m;
@@ -63,19 +66,47 @@ function listJs(dir) {
   const camSrc = readSrc('app/js/camera.js');
   const cfgSrc = readSrc('app/js/config.js');
   const zSrc = readSrc('app/js/zhiyun.js');
+  const fmtSrc = readSrc('app/js/format.js');
+  const gridSrc = readSrc('app/js/grid.js');
+  const dbgSrc = readSrc('app/js/debug.js');
+  const menuSrc = readSrc('app/js/menu.js');
   const cfgBody = (/var C = \{([\s\S]*?)\n  \};/.exec(cfgSrc) || ['', ''])[1];
   const zExport = (/root\.Zhiyun = \{([\s\S]*?)\n  \};/.exec(zSrc) || ['', ''])[1];
+  /* 模块既可能用 X.y = … 定义，也可能是 var X = { k: … } 字面量，或 root.KaiX = { k: … } 导出别名，
+   * 三种写法都收集 */
+  const objKeys = (src, name) => {
+    const body = (new RegExp('var ' + name + ' = \\{([\\s\\S]*?)\\n  \\};').exec(src) || ['', ''])[1];
+    return namesOf(/^\s*([\w$]+)\s*:/gm, body);
+  };
+  const exportKeys = (src) => {
+    const out = [];
+    let m;
+    const re = /root\.\w+\s*=\s*\{([^}]*)\};/g;
+    while ((m = re.exec(src)) !== null) {
+      let k;
+      const reK = /([\w$]+)\s*:/g;
+      while ((k = reK.exec(m[1])) !== null) out.push(k[1]);
+    }
+    return out;
+  };
+  const membersOf = (src, name, assignRe) =>
+    new Set([...namesOf(assignRe, src), ...objKeys(src, name), ...exportKeys(src)]);
   const known = {
-    U: namesOf(/U\.([\w$]+)\s*=/g, utilSrc),
-    UI: namesOf(/UI\.([\w$]+)\s*=/g, uiSrc),
-    Buttons: namesOf(/B\.([\w$]+)\s*=/g, btnSrc),
-    AppCfg: namesOf(/([\w$]+)\s*:/g, cfgBody),
+    U: membersOf(utilSrc, 'U', /U\.([\w$]+)\s*=/g),
+    UI: membersOf(uiSrc, 'UI', /UI\.([\w$]+)\s*=/g),
+    Buttons: membersOf(btnSrc, 'B', /B\.([\w$]+)\s*=/g),
+    AppCfg: new Set([...namesOf(/([\w$]+)\s*:/g, cfgBody), ...objKeys(cfgSrc, 'C')]),
     Session: new Set([...namesOf(/Session\.prototype\.([\w$]+)\s*=/g, sessSrc), ...namesOf(/this\.([\w$]+)\s*=/g, sessSrc)]),
     bt: new Set([...namesOf(/Bt\.prototype\.([\w$]+)\s*=/g, bleSrc), ...namesOf(/this\.([\w$]+)\s*=/g, bleSrc)]),
     Z: namesOf(/([\w$]+)\s*:/g, zExport),
-    cam: new Set([...namesOf(/Cam\.prototype\.([\w$]+)\s*=/g, camSrc), ...namesOf(/this\.([\w$]+)\s*=/g, camSrc)])
+    cam: new Set([...namesOf(/Cam\.prototype\.([\w$]+)\s*=/g, camSrc), ...namesOf(/this\.([\w$]+)\s*=/g, camSrc)]),
+    F: membersOf(fmtSrc, 'F', /F\.([\w$]+)\s*=/g),
+    Grid: membersOf(gridSrc, 'Grid', /Grid\.([\w$]+)\s*=/g),
+    Dbg: membersOf(dbgSrc, 'Dbg', /Dbg\.([\w$]+)\s*=/g),
+    Menu: membersOf(menuSrc, 'Menu', /Menu\.([\w$]+)\s*=/g),
+    Strings: new Set(['t', 'val', 'LANG'])
   };
-  const reUse = /\b(U|UI|Buttons|AppCfg|Session|bt|Z|cam)\.([A-Za-z_$][\w$]*)/g;
+  const reUse = /\b(U|UI|Buttons|AppCfg|Session|bt|Z|cam|F|Grid|Dbg|Menu|Strings)\.([A-Za-z_$][\w$]*)/g;
   const bad = [];
   [...listJs(path.join(rootDir, 'app/js')), ...listJs(path.join(rootDir, 'tools/probe/js'))].forEach((f) => {
     const raw = fs.readFileSync(f, 'utf8');
@@ -89,7 +120,7 @@ function listJs(dir) {
       const tail = src.slice(m.index + m[0].length);
       if (/^\s*(=[^=]|:)/.test(tail)) continue;  /* 赋值/键值：是定义不是访问 */
       if (known[alias] && known[alias].has(name)) continue;
-      const line = raw.slice(0, raw.indexOf(src.slice(m.index, m.index + 1)) >= 0 ? m.index : 0).split('\n').length;
+      const line = src.slice(0, m.index).split('\n').length;
       bad.push(path.relative(rootDir, f) + ':' + line + '  ' + alias + '.' + name);
     }
   });
@@ -147,11 +178,108 @@ try {
   check(false, '协议自测异常: ' + e.message);
 }
 
-/* 4) 共享 JS 同步到探针（逐字节一致由这里保证） */
-['config.js', 'util.js', 'ble.js', 'session.js', 'buttons.js', 'zhiyun.js'].forEach((f) => {
-  fs.copyFileSync(path.join(rootDir, 'app/js', f), path.join(rootDir, 'tools/probe/js', f));
+/* 3b) i18n 检查：zh/en 键集合一致、静态 t('…') 的键存在、未使用的键给出提醒 */
+(function i18nCheck() {
+  const src = fs.readFileSync(path.join(rootDir, 'app/js/strings.js'), 'utf8');
+  const dictOf = (lang) => {
+    const re = new RegExp(lang + ":\\s*\\{([\\s\\S]*?)\\n    \\}");
+    const body = (re.exec(src) || ['', ''])[1];
+    const keys = new Set();
+    let m;
+    const reKey = /^\s*'?([A-Za-z_$][\w$-]*)'?\s*:/gm;
+    while ((m = reKey.exec(body)) !== null) keys.add(m[1]);
+    return keys;
+  };
+  const zh = dictOf('zh');
+  const en = dictOf('en');
+  const onlyZh = [...zh].filter((k) => !en.has(k));
+  const onlyEn = [...en].filter((k) => !zh.has(k));
+  check(onlyZh.length === 0 && onlyEn.length === 0,
+    'i18n 键集合一致（zh ' + zh.size + ' / en ' + en.size + '）' +
+    (onlyZh.length ? '：仅 zh 有 ' + onlyZh.join(',') : '') +
+    (onlyEn.length ? '：仅 en 有 ' + onlyEn.join(',') : ''));
+
+  /* 收集全仓用到的键：t('x') / addCycle('x') 等字面量；以及字符串里出现的字典键名 */
+  const files = [...listJs(path.join(rootDir, 'app/js')), ...listJs(path.join(rootDir, 'tools/probe/js'))]
+    .filter((f) => !f.endsWith('strings.js'));
+  const used = new Set();
+  const missing = [];
+  files.forEach((f) => {
+    const raw = fs.readFileSync(f, 'utf8');
+    let m;
+    const reT = /\bt\(\s*'([^']+)'\s*\)/g;
+    while ((m = reT.exec(raw)) !== null) {
+      const k = m[1];
+      used.add(k);
+      if (!zh.has(k)) missing.push(path.relative(rootDir, f) + '  t(' + k + ')');
+    }
+    /* GRID_LABELS 这类"键名写在映射表里"的用法：只要字面量恰好是字典键就算用到 */
+    const reAny = /'([A-Za-z_$][\w$-]*)'/g;
+    while ((m = reAny.exec(raw)) !== null) { if (zh.has(m[1])) used.add(m[1]); }
+  });
+  check(missing.length === 0, 'i18n 键都存在（未定义：' + (missing.length ? '\n    ' + missing.join('\n    ') : '0') + '）');
+
+  const unused = [...zh].filter((k) => !used.has(k));
+  if (unused.length) console.log('· 提醒：以下 i18n 键暂未被引用（可删）：' + unused.join(', '));
+})();
+
+/* 4) 共享 JS 同步到探针：先比对再复制——探针侧若有未同步的改动会当场失败，
+ * 不再被静默覆盖（同步基线记在 tools/probe/.sync-state.json） */
+(function syncShared() {
+  const shared = ['config.js', 'util.js', 'ble.js', 'session.js', 'buttons.js', 'zhiyun.js'];
+  const stateFile = path.join(rootDir, 'tools/probe/.sync-state.json');
+  let baseline = {};
+  try { baseline = JSON.parse(fs.readFileSync(stateFile, 'utf8')); } catch (e) { baseline = {}; }
+  const sha = (p) => require('crypto').createHash('sha1').update(fs.readFileSync(p)).digest('hex');
+  const drifted = [];
+  shared.forEach((f) => {
+    const probeFile = path.join(rootDir, 'tools/probe/js', f);
+    if (baseline[f] && fs.existsSync(probeFile) && sha(probeFile) !== baseline[f]) drifted.push(f);
+  });
+  check(drifted.length === 0,
+    '共享 JS 无探针侧漂移（基线来自上次同步）' +
+    (drifted.length ? '：' + drifted.join(',') + ' 在探针侧被改过；要保留请先搬回 app/js' : ''));
+  const next = {};
+  shared.forEach((f) => {
+    fs.copyFileSync(path.join(rootDir, 'app/js', f), path.join(rootDir, 'tools/probe/js', f));
+    next[f] = sha(path.join(rootDir, 'tools/probe/js', f));
+  });
+  fs.writeFileSync(stateFile, JSON.stringify(next, null, 2) + '\n');
+  console.log('✓ 共享 JS 已同步到 tools/probe/js（基线已更新）');
+})();
+
+/* 4b) HTML 脚本图检查：脚本文件都存在、顺序满足依赖、app/js 下的文件都被引到 */
+(function scriptGraph() {
+  const order = ['config.js', 'util.js', 'format.js', 'strings.js', 'zhiyun.js', 'ble.js', 'session.js',
+    'buttons.js', 'camera.js', 'ui.js', 'grid.js', 'debug.js', 'menu.js', 'main.js'];
+  ['app/index.html', 'tools/probe/index.html'].forEach((rel) => {
+    const html = fs.readFileSync(path.join(rootDir, rel), 'utf8');
+    const srcs = [...html.matchAll(/<script src="js\/([^"]+)"><\/script>/g)].map((m) => m[1]);
+    const missing = srcs.filter((s) => !fs.existsSync(path.join(rootDir, path.dirname(rel), 'js', s)));
+    check(missing.length === 0 && srcs.length > 0,
+      rel + ' 脚本文件都存在（' + srcs.length + ' 个）' + (missing.length ? '：缺 ' + missing.join(',') : ''));
+    const idx = (f) => srcs.indexOf(f);
+    if (rel === 'app/index.html') {
+      check(idx('main.js') === srcs.length - 1, 'app 的 main.js 在脚本序列最后');
+      const bad = order.filter((f, i) => i > 0 && idx(order[i - 1]) > idx(f) && idx(f) !== -1);
+      check(bad.length === 0, 'app 脚本顺序满足依赖' + (bad.length ? '：' + bad.join(',') + ' 位置不对' : ''));
+      const all = listJs(path.join(rootDir, 'app/js')).map((p) => path.basename(p));
+      const notLoaded = all.filter((f) => srcs.indexOf(f) === -1);
+      check(notLoaded.length === 0, 'app/js 下每个文件都被 index.html 引用' +
+        (notLoaded.length ? '：漏 ' + notLoaded.join(',') : ''));
+    }
+  });
+})();
+
+/* 4c) 单元/会话测试（与构建同跑，避免"忘记跑测试"） */
+['scripts/test-units.js', 'scripts/test-session.js'].forEach((rel) => {
+  try {
+    execFileSync(process.execPath, [path.join(rootDir, rel)], { stdio: 'pipe' });
+    console.log('✓ 测试通过 ' + rel);
+  } catch (e) {
+    check(false, '测试失败 ' + rel + '\n' + String(e.stdout || '') + String(e.stderr || ''));
+  }
 });
-console.log('✓ 共享 JS 已同步到 tools/probe/js');
 
 /* 5) 图标缺失时生成 */
 if (!fs.existsSync(path.join(rootDir, 'app/icons/icon112.png'))) {

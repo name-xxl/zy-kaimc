@@ -55,12 +55,49 @@
     });
   };
 
+  /* 顶部：三枚药丸（状态/录像/模式），保持原样式。
+   * 底部：**一条贯穿全宽的信息条**（左参数、右变焦），两者都空时整条隐藏——
+   * 不再出现"两块分离黑底 + 中间一道缝"的观感 */
+  var bottom = { param: '', zoom: '' };
+
   UI.hud = function (o) {
     if ('ble' in o) { U.setText('hud-ble', o.ble); U.show('hud-ble', !!o.ble); }
     if ('mode' in o) U.setText('hud-mode', o.mode);
     if ('rec' in o) { U.setText('hud-rec', o.rec); U.show('hud-rec', !!o.rec); }
-    if ('param' in o) { U.setText('hud-param', o.param); U.show('hud-param', !!o.param); }
-    if ('zoom' in o) { U.setText('hud-zoom', o.zoom); U.show('hud-zoom', !!o.zoom); }
+    if ('param' in o || 'zoom' in o) {
+      if ('param' in o) bottom.param = o.param || '';
+      if ('zoom' in o) bottom.zoom = o.zoom || '';
+      U.setText('hud-param', bottom.param);
+      U.setText('hud-zoom', bottom.zoom);
+      U.show('hud-bottom', !!(bottom.param || bottom.zoom));
+    }
+  };
+
+  /* 中央提示块：启动信息 / 倒计时 / 拍摄进度；只给需要显示的字段 */
+  UI.splash = function (o) {
+    o = o || {};
+    U.setText('splash-title', o.title || '');
+    U.setText('splash-big', o.big || '');
+    U.setText('splash-sub', o.sub || '');
+    U.setText('splash-hint', o.hint || '');
+    U.show('splash-title', !!o.title);
+    U.show('splash-big', !!o.big);
+    U.show('splash-sub', !!o.sub);
+    U.show('splash-hint', !!o.hint);
+    var el = U.byId('splash');
+    if (el) el.classList.remove('fade');
+    U.show('splash', !!(o.title || o.big || o.sub || o.hint));
+  };
+
+  UI.splashHide = function (fade) {
+    var el = U.byId('splash');
+    if (!el) return;
+    if (fade) {
+      el.classList.add('fade');
+      root.setTimeout(function () { U.show('splash', false); el.classList.remove('fade'); }, 320);
+    } else {
+      U.show('splash', false);
+    }
   };
 
   UI.toast = function (msg, ms) {

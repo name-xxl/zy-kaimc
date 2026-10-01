@@ -1,8 +1,12 @@
-/* 主逻辑：相机取景 + 云台 BLE 连接 + 按键映射 + 键盘操作 + 屏幕调试面板 */
+/* 主逻辑：编排相机取景、云台会话、按键映射与界面状态。
+ * 具体职责已外移：format.js（纯格式/换算）、grid.js（构图辅助线）、debug.js（调试面板）、
+ * menu.js（参数菜单）；本文件只做启动、云台链路编排、拍摄动作与键盘分发。
+ * 键码与时序常量见 config.js（AppCfg.KEY / AppCfg.*_MS） */
 (function (root) {
   'use strict';
 
   var U = root.KaiUtil;
+  var F = root.KaiFmt;
   var t = root.Strings.t;
   var tval = root.Strings.val;   /* 相机 HAL 取值汉化（auto→自动 等） */
   var UI = root.KaiUI;
@@ -11,43 +15,49 @@
   var AppCfg = root.AppCfg;
   var Buttons = root.KaiButtons;
   var Session = root.KaiSession;
+  var Grid = root.KaiGrid;
+  var Dbg = root.KaiDbg;
+  var Menu = root.KaiMenu;
 
-  /* 本文件只做编排：相机 + UI/键位 + 云台会话(KaiSession) + 按键分发(KaiButtons)。
-   * 键码与时序常量见 config.js（AppCfg.KEY / AppCfg.*_MS） */
-
-  var APP_VERSION = 'v8.6';
+  var APP_VERSION = 'v8.7';
   var GIMBAL_NAME_RE = /CRANE[-_ ]?M2/i;
 
-  var state = {
-    mode: 'picture',
+  /* 云台链路状态 */
+  var link = {
+    session: null,
     stopScan: null,
     reconnectTimer: null,
     reconnectStep: 0,
     cdTimer: null,
-    gimbalBatt: null,
-    gimbalBattRaw: null,
-    gimbalMode: null,
-    gimbalConnected: false,
+    battTimer: null,
+    modeTimer: null,
+    connected: false,
+    alive: true,
     bleText: '',
+    batt: null,
+    battRaw: null,
+    mode: null,
     lastKeyAt: 0,
     lastModeQuery: 0,
     lastFrameAt: 0,
-    gimbalAlive: true,
-    battTimer: null,
-    modeTimer: null,
-    rxCount: 0,
+    rxCount: 0
+  };
+
+  /* 拍摄（本机）状态 */
+  var state = {
     recTimer: null,
     recSecs: 0,
     zoomRatios: [],
     zoomIdx: 0,
     zoomHoldTimer: null,
     ecList: [],
-    ecNow: 0,
-    debugOn: false,
-    debugScroll: 0,
-    grid: false,
-    appLog: []
+    ecNow: 0
   };
+
+  /* 拍摄扩展设置（菜单里改，会话内存续）：自拍定时秒数 / 连拍张数 / 间隔定时 '间隔x张数' */
+  var shoot = { delay: 0, burst: 0, interval: '0' };
+  /* 进行中的拍摄序列：{ total, left, timer, cd } */
+  var seq = null;
 
   /* 把动作注入按键分发层（依赖倒置：buttons.js 只认动作名，不依赖本文件） */
   Buttons.bind({
@@ -64,7 +74,9 @@
   root.addEventListener('beforeunload', releaseHal);
 
   function releaseHal() {
-    try { if (cam.control) cam.control.release(); } catch (e) { /* 已释放 */ }
+    zoomHoldStop();
+    abortSeq();
+    cam.release();
   }
 
   /* 满屏：manifest 已声明 "fullscreen": "true"（启动即全屏、状态栏不出现、不受息屏影响）；
@@ -78,43 +90,6 @@
     } catch (e) { /* 不支持就维持普通布局 */ }
   }
 
-  /* ---------- 调试面板（取景界面按 # 开关） ---------- */
-
-  function dlog(msg) {
-    state.appLog.push(fmtClock() + ' ' + msg);
-    if (state.appLog.length > 60) state.appLog.shift();
-    try { root.console.log('[app] ' + msg); } catch (e) { /* 无 console */ }
-    renderDebug();
-  }
-
-  /* 调试面板：只显示最近 DEBUG_PAGE 条，**最新的在最上面**（240×320 装不下 10 行，
-   * 之前最新的日志被 max-height 裁掉）；面板打开时 ↑ 往旧翻、↓ 往回翻 */
-  var DEBUG_PAGE = 7;
-
-  function debugMaxScroll(total) {
-    return Math.max(0, Math.ceil(total / DEBUG_PAGE) - 1);
-  }
-
-  function renderDebug() {
-    var el = U.byId('debug');
-    if (!el) return;
-    if (!state.debugOn) { el.textContent = ''; U.show('debug', false); return; }
-    U.show('debug', true);
-    var lines = cam.getLog().concat(state.appLog);
-    var off = Math.min(state.debugScroll || 0, debugMaxScroll(lines.length));
-    state.debugScroll = off;
-    var end = Math.max(0, lines.length - off * DEBUG_PAGE);
-    var start = Math.max(0, end - DEBUG_PAGE);
-    var head = '# 日志' + (off ? ' -' + off + '页' : '') + '（↑旧 ↓新 #关）';
-    el.textContent = head + '\n' + lines.slice(start, end).reverse().join('\n');
-  }
-
-  function fmtClock() {
-    var d = new Date();
-    var p = function (n) { return (n < 10 ? '0' : '') + n; };
-    return p(d.getHours()) + ':' + p(d.getMinutes()) + ':' + p(d.getSeconds());
-  }
-
   /* ---------- 启动 ---------- */
 
   function boot() {
@@ -122,28 +97,36 @@
     goFullscreen();
     U.lockPortrait();
     setFinderKeys();
-    UI.toast('ZY-KaiCam ' + APP_VERSION, 2500);
+    Dbg.init({ getExtra: function () { return cam.getLog(); } });
+    UI.splash({ title: 'ZY-KaiCam', sub: APP_VERSION, hint: t('camInit') });
     setHudBle(t('camInit'));
     UI.hud({ mode: t('modePhoto') });
-    state.grid = loadGrid();
-    applyGrid();
+    Grid.load();
+    Grid.apply();
     root.addEventListener('keydown', onKey);
     root.document.addEventListener('visibilitychange', onVis);
     probeAppIdentity();
 
-    cam.init().then(function () {
-      return cam.startPreview(U.byId('preview'));
-    }).then(function () {
-      dlog('✓ 相机就绪');
-      setupZoomAndEc();
-      renderHudParams();
+    startCamera().then(function () {
+      Dbg.log('✓ 相机就绪');
+      UI.splashHide(true);
       setHudBle(t('scan'));
       connectGimbal();
     }).catch(function (err) {
-      dlog('✗ 相机初始化失败: ' + (err && err.message));
-      UI.toast(cam.control ? t('previewFail') : t('camAllFail'), 5000);
+      Dbg.log('✗ 相机初始化失败: ' + (err && err.message));
+      UI.splash({ title: 'ZY-KaiCam', sub: APP_VERSION,
+        hint: cam.control ? t('previewFail') : t('camAllFail') });
       setHudBle(t('scan'));
       connectGimbal(); /* 相机失败不影响连云台 */
+    });
+  }
+
+  function startCamera() {
+    return cam.init().then(function () {
+      return cam.startPreview(U.byId('preview'));
+    }).then(function () {
+      setupZoomAndEc();
+      renderHudParams();
     });
   }
 
@@ -155,76 +138,67 @@
         var req = m.getSelf();
         req.onsuccess = function () {
           var a = req.result;
-          dlog('app type=' + (a && a.manifest ? a.manifest.type : '?') +
+          Dbg.log('app type=' + (a && a.manifest ? a.manifest.type : '?') +
             ' origin=' + ((a && a.installOrigin) || '?'));
         };
-        req.onerror = function () { dlog('app getSelf 失败'); };
+        req.onerror = function () { Dbg.log('app getSelf 失败'); };
       }
     } catch (e) { /* 无 mozApps */ }
     try {
       var ds = root.navigator.getDeviceStorage ? root.navigator.getDeviceStorage('pictures') : null;
-      dlog('priv: storage=' + (ds ? 'ok' : 'null') +
+      Dbg.log('priv: storage=' + (ds ? 'ok' : 'null') +
         ' bt=' + (root.navigator.mozBluetooth ? 'ok' : 'null'));
     } catch (e) { /* 无 deviceStorage */ }
   }
 
   function retryCamera() {
     UI.toast(t('retrying'));
-    dlog('手动重试相机(' + state.mode + ')…');
-    if (cam.control) {
-      try { cam.control.release(); } catch (e) { /* 继续 */ }
-      cam.control = null;
-    }
-    cam.mode = state.mode;
-    cam.init().then(function () {
-      return cam.startPreview(U.byId('preview'));
-    }).then(function () {
-      dlog('✓ 相机重试成功');
-      setupZoomAndEc();
-      renderHudParams();
+    Dbg.log('手动重试相机(' + cam.mode + ')…');
+    cam.release();
+    startCamera().then(function () {
+      Dbg.log('✓ 相机重试成功');
+      UI.splashHide(true);
     }).catch(function (err) {
-      dlog('✗ 相机重试失败: ' + (err && err.message));
-      UI.toast(cam.control ? t('previewFail') : t('camAllFail'), 4000);
-      renderDebug();
+      Dbg.log('✗ 相机重试失败: ' + (err && err.message));
+      UI.splash({ title: 'ZY-KaiCam', sub: APP_VERSION,
+        hint: cam.control ? t('previewFail') : t('camAllFail') });
     });
   }
 
   /* ---------- 云台连接（连接/订阅/初始化/接收 都交给 KaiSession，这里只做编排与重连） ---------- */
 
-  var session = null;
-
   function connectGimbal() {
     bt.init().then(function () {
-      dlog('BT: ' + bt.radioProbe());
+      Dbg.log('BT: ' + bt.radioProbe());
       /* 状态检测失败不阻断——直接试扫描，扫描会给出真实错误 */
       return bt.ensureEnabled().catch(function (e) {
-        dlog('BT 开启存疑仍尝试扫描: ' + e.message);
+        Dbg.log('BT 开启存疑仍尝试扫描: ' + e.message);
       });
     }).then(function () {
-      dlog('扫描 ' + GIMBAL_NAME_RE);
+      Dbg.log('扫描 ' + GIMBAL_NAME_RE);
       setHudBle(t('scan'));
       return waitForGimbal();
     }).then(function (dev) {
-      dlog('发现云台 ' + dev.name + ' @' + dev.address);
+      Dbg.log('发现云台 ' + dev.name + ' @' + dev.address);
       setHudBle(t('connecting'));
-      session = new Session({
+      link.session = new Session({
         onFrame: onGimbalFrame,
         onButton: onGimbalButton,
         onState: function (st, reason) { if (st === 'disconnected') onDisconnected(reason); },
-        onLog: dlog
+        onLog: Dbg.log
       });
-      return session.open(dev);
+      return link.session.open(dev);
     }).then(function () {
-      dlog('✓ 云台就绪');
-      state.gimbalConnected = true;
+      Dbg.log('✓ 云台就绪');
+      link.connected = true;
       setHudBle(t('connected'));
       UI.toast(t('connected'));
-      state.reconnectStep = 0;          /* 连上即重置重连退避 */
+      link.reconnectStep = 0;          /* 连上即重置重连退避 */
       stopCountdown();
       startQueries();
     }).catch(function (err) {
-      dlog('✗ 云台连接失败: ' + (err && err.message));
-      state.gimbalConnected = false;
+      Dbg.log('✗ 云台连接失败: ' + (err && err.message));
+      link.connected = false;
       setHudBle(t('btBad'));
       UI.toast(err.message || t('btFail'), 3500);
       scheduleReconnect();
@@ -237,66 +211,66 @@
       bt.startScan(function (dev) {
         if (found || !GIMBAL_NAME_RE.test(dev.name)) return;
         found = true;
-        if (state.stopScan) state.stopScan();
+        if (link.stopScan) { link.stopScan(); link.stopScan = null; }
         resolve(dev);
       }).then(function (h) {
-        state.stopScan = h.stop;
-        if (found) h.stop();
+        link.stopScan = h.stop;
+        if (found) { h.stop(); link.stopScan = null; }   /* 连上即释放扫描句柄 */
       }).catch(reject);
     });
   }
 
   /* 断线/连接失败 → 退避重连（config.RECONNECT_MS）+ HUD 倒计时；连上后重置步数 */
   function scheduleReconnect() {
-    var seq = AppCfg.RECONNECT_MS;
-    var step = state.reconnectStep || 0;
-    var ms = seq[Math.min(step, seq.length - 1)];
-    state.reconnectStep = step + 1;
-    root.clearTimeout(state.reconnectTimer);
-    state.reconnectTimer = root.setTimeout(connectGimbal, ms);
-    if (state.cdTimer) root.clearInterval(state.cdTimer);
+    var seqMs = AppCfg.RECONNECT_MS;
+    var step = link.reconnectStep || 0;
+    var ms = seqMs[Math.min(step, seqMs.length - 1)];
+    link.reconnectStep = step + 1;
+    root.clearTimeout(link.reconnectTimer);
+    link.reconnectTimer = root.setTimeout(connectGimbal, ms);
+    if (link.cdTimer) root.clearInterval(link.cdTimer);
     var left = Math.round(ms / 1000);
     setHudBle(t('disconnected') + ' ' + left + 's');
-    state.cdTimer = root.setInterval(function () {
+    link.cdTimer = root.setInterval(function () {
       left--;
-      if (left <= 0) { root.clearInterval(state.cdTimer); state.cdTimer = null; return; }
+      if (left <= 0) { root.clearInterval(link.cdTimer); link.cdTimer = null; return; }
       setHudBle(t('disconnected') + ' ' + left + 's');
     }, 1000);
   }
 
   function stopCountdown() {
-    if (state.cdTimer) { root.clearInterval(state.cdTimer); state.cdTimer = null; }
+    if (link.cdTimer) { root.clearInterval(link.cdTimer); link.cdTimer = null; }
   }
 
-  /* ---------- 周期查询：电量（0x06）/ 模式（0x27）---------- */
+  /* ---------- 周期查询：电量（0x06）/ 模式（0x27） ---------- */
 
   function queryBattery() {
-    if (!session) return;
-    session.send(0x06, [0x00, 0x00, 0x00]).catch(function () { /* 失败忽略 */ });
+    if (!link.session) return;
+    link.session.send(0x06, [0x00, 0x00, 0x00]).catch(function () { /* 失败忽略 */ });
   }
 
   function startQueries() {
     stopQueries();
     if (AppCfg.BATTERY_QUERY_MS) {
       queryBattery();                                   /* 连上先查一次 */
-      state.battTimer = root.setInterval(queryBattery, AppCfg.BATTERY_QUERY_MS);
+      link.battTimer = root.setInterval(queryBattery, AppCfg.BATTERY_QUERY_MS);
     }
     /* 模式查询：M 键/扳机不上报（云台不推模式变化），只能主动问。
      * 空闲按 MODE_QUERY_MS；一旦收到云台按键（说明人正在操作）就压到 MODE_QUERY_FAST_MS，
      * 持续 MODE_FAST_TAIL_MS 无按键后回落。250ms 本地 tick 只判断"到点没"，
      * 真正发帧按上面节奏走——多几个 14 字节小包，射频开销可忽略 */
-    state.lastKeyAt = 0;
-    state.lastModeQuery = 0;
-    state.lastFrameAt = 0;      /* 云台最后一次回包时间（待机/无应答判定用） */
-    state.gimbalAlive = true;
+    link.lastKeyAt = 0;
+    link.lastModeQuery = 0;
+    link.lastFrameAt = 0;      /* 云台最后一次回包时间（待机/无应答判定用） */
+    link.alive = true;
     if (AppCfg.MODE_QUERY_MS) {
-      state.modeTimer = root.setInterval(function () {
-        if (!session) return;
+      link.modeTimer = root.setInterval(function () {
+        if (!link.session) return;
         var now = Date.now();
         checkGimbalSilent(now);
-        if (now - state.lastModeQuery < modeQueryDelay(now)) return;
-        state.lastModeQuery = now;
-        session.sendRaw(AppCfg.FRAME_MODE_QUERY, true).catch(function () { /* 忽略 */ });
+        if (now - link.lastModeQuery < modeQueryDelay(now)) return;
+        link.lastModeQuery = now;
+        link.session.sendRaw(AppCfg.FRAME_MODE_QUERY, true).catch(function () { /* 忽略 */ });
       }, 250);
     }
   }
@@ -304,38 +278,38 @@
   /* 云台待机（休眠）实测：BLE 链路仍在、但对任何命令都不应答 —— 靠"连续无应答"判定，
    * 避免把休眠前的缓存电量/模式当实时值显示。门限 = 2 个查询周期 + 3s */
   function checkGimbalSilent(now) {
-    if (!state.lastFrameAt) return;
+    if (!link.lastFrameAt) return;
     var limit = modeQueryDelay(now) * 2 + 3000;
-    var alive = (now - state.lastFrameAt) < limit;
-    if (alive === state.gimbalAlive) return;
-    state.gimbalAlive = alive;
-    dlog(alive ? '云台恢复应答' : '云台无应答 ' + Math.round((now - state.lastFrameAt) / 1000) + 's（待机？）');
+    var alive = (now - link.lastFrameAt) < limit;
+    if (alive === link.alive) return;
+    link.alive = alive;
+    Dbg.log(alive ? '云台恢复应答' : '云台无应答 ' + Math.round((now - link.lastFrameAt) / 1000) + 's（待机？）');
     renderHudBle();
   }
 
   /* 当前该用多长的查询间隔：人刚动过云台 → 快 */
   function modeQueryDelay(now) {
     var fast = AppCfg.MODE_QUERY_FAST_MS, tail = AppCfg.MODE_FAST_TAIL_MS;
-    if (fast && tail && state.lastKeyAt && (now - state.lastKeyAt) < tail) return fast;
+    if (fast && tail && link.lastKeyAt && (now - link.lastKeyAt) < tail) return fast;
     return AppCfg.MODE_QUERY_MS;
   }
 
   function stopQueries() {
-    if (state.battTimer) { root.clearInterval(state.battTimer); state.battTimer = null; }
-    if (state.modeTimer) { root.clearInterval(state.modeTimer); state.modeTimer = null; }
+    if (link.battTimer) { root.clearInterval(link.battTimer); link.battTimer = null; }
+    if (link.modeTimer) { root.clearInterval(link.modeTimer); link.modeTimer = null; }
   }
 
   function onDisconnected(reason) {
-    dlog('云台断线' + (reason ? '(' + reason + ')' : '') + '，重连中');
+    Dbg.log('云台断线' + (reason ? '(' + reason + ')' : '') + '，重连中');
     zoomHoldStop();
     stopQueries();
-    if (session) { session.close(); session = null; }
-    state.gimbalBatt = null;
-    state.gimbalBattRaw = null;
-    state.gimbalMode = null;
-    state.gimbalConnected = false;
-    state.lastFrameAt = 0;
-    state.gimbalAlive = true;
+    if (link.session) { link.session.close(); link.session = null; }
+    link.batt = null;
+    link.battRaw = null;
+    link.mode = null;
+    link.connected = false;
+    link.lastFrameAt = 0;
+    link.alive = true;
     renderHudParams();
     scheduleReconnect();
   }
@@ -343,15 +317,13 @@
   /* ---------- 诊断键工具（config.DEBUG=true 时才会被按键调用） ---------- */
 
   function diagSend(cmd, args, tag) {
-    if (!session) { dlog('未连接，无法发送 ' + tag); return; }
-    session.send(cmd, args).then(function () {
-      dlog('[OUT] ' + tag);
+    if (!link.session) { Dbg.log('未连接，无法发送 ' + tag); return; }
+    link.session.send(cmd, args).then(function () {
+      Dbg.log('[OUT] ' + tag);
     }, function (e) {
-      dlog('[OUT] ' + tag + ' 失败: ' + ((e && (e.message || e.name)) || e));
+      Dbg.log('[OUT] ' + tag + ' 失败: ' + ((e && (e.message || e.name)) || e));
     });
   }
-
-  function askBattery() { diagSend(0x06, [0x00, 0x00, 0x00], '电量查询'); }
 
   /* 0x02 是历史资料里的探测帧，**不是**官方初始化序列的一部分（官方首个命令是 0x04） */
   function sayHello() { diagSend(0x02, [0x00, 0x00, 0x00], '0x02 探测帧'); }
@@ -363,13 +335,13 @@
     [0x03, [0x10, 0xD4, 0x0E]]
   ];
   function motionTest() {
-    if (!session) { dlog('未连接，无法做可见测试'); return; }
+    if (!link.session) { Dbg.log('未连接，无法做可见测试'); return; }
     var round = 0;
-    dlog('可见测试开始：看云台会不会动（共 6 轮）');
+    Dbg.log('可见测试开始：看云台会不会动（共 6 轮）');
     var timer = root.setInterval(function () {
-      if (!session || round >= 6) {
+      if (!link.session || round >= 6) {
         root.clearInterval(timer);
-        dlog('可见测试结束：云台动了=我们的写入有效；没动=写没出去');
+        Dbg.log('可见测试结束：云台动了=我们的写入有效；没动=写没出去');
         return;
       }
       MOTION_FRAMES.forEach(function (mf) { diagSend(mf[0], mf[1], '运动 0x' + mf[0].toString(16)); });
@@ -380,11 +352,11 @@
   /* ---------- 云台事件 ---------- */
 
   function onGimbalFrame(f) {
-    state.rxCount++;
-    state.lastFrameAt = Date.now();
+    link.rxCount++;
+    link.lastFrameAt = Date.now();
     /* 抓字段：前 14 帧 + 之后每 10 帧打原始字节（含初始化应答与按键帧） */
-    if (state.rxCount <= 14 || state.rxCount % 10 === 0) {
-      dlog('[IN#' + state.rxCount + '] ' + U.hex(f.raw) + ' cmd=0x' + f.cmd.toString(16) +
+    if (link.rxCount <= 14 || link.rxCount % 10 === 0) {
+      Dbg.log('[IN#' + link.rxCount + '] ' + U.hex(f.raw) + ' cmd=0x' + f.cmd.toString(16) +
         (f.crcOk ? '' : ' CRC✗'));
     }
     if (!f.crcOk) return;
@@ -392,11 +364,11 @@
     /* 电量应答（cmd 0x06）：args = 00 <lo> <hi>，值是电池组电压×10mV（见 config.BATT_CELL_CURVE） */
     if (f.cmd === 0x06 && f.payload.length >= 3) {
       var raw = f.payload[1] | (f.payload[2] << 8);
-      if (raw !== state.gimbalBattRaw) {
-        state.gimbalBattRaw = raw;
-        var pct = battPct(raw);
-        dlog('电量 ' + (raw / 100).toFixed(2) + 'V ≈ ' + pct + '%');
-        state.gimbalBatt = pct;
+      if (raw !== link.battRaw) {
+        link.battRaw = raw;
+        var pct = F.battPct(raw);
+        Dbg.log('电量 ' + (raw / 100).toFixed(2) + 'V ≈ ' + pct + '%');
+        link.batt = pct;
         renderHudBle();
       }
     }
@@ -404,60 +376,122 @@
     /* 云台模式应答（0x27 查询）：ARGS = 00 <模式> 00；变化才记 + 顶部状态行显示 */
     if (f.cmd === 0x27 && f.payload.length >= 2) {
       var mode = f.payload[1];
-      if (mode !== state.gimbalMode) {
-        state.gimbalMode = mode;
-        dlog('云台模式 0x' + mode.toString(16) + (modeName(mode) ? ' = ' + modeName(mode) : '（未登记）'));
+      if (mode !== link.mode) {
+        link.mode = mode;
+        Dbg.log('云台模式 0x' + mode.toString(16) + (modeName(mode) ? ' = ' + modeName(mode) : '（未登记）'));
         renderHudBle();
       }
     }
-
-    /* 心跳帧（0x1815）：payload 首字节旧口径当过"电量百分比"，但样例 0x50=80 与 0x06 电压口径
-     * 对不上（0x06 才是权威电量），已弃用，避免污染电量显示 */
   }
 
   function onGimbalButton(f) {
     /* 键码在 payload 第二字节（格式 C0 <码> 00）；未登记的键码只记日志不动作 */
-    state.lastKeyAt = Date.now();   /* 人在操作 → 模式查询提速（见 startQueries） */
+    link.lastKeyAt = Date.now();   /* 人在操作 → 模式查询提速（见 startQueries） */
     var code = Buttons.codeOf(f);
-    dlog('云台按键 code=' + (code === null ? '??' : '0x' + code.toString(16)) + ' payload=' + U.hex(f.payload));
+    Dbg.log('云台按键 code=' + (code === null ? '??' : '0x' + code.toString(16)) + ' payload=' + U.hex(f.payload));
     Buttons.handle(code);
   }
 
-  /* 连续变焦：按下启动（先立即走一档，再按周期）；松开即停；到顶/到底自动停 */
-  function zoomHoldStart(dir) {
-    zoomHoldStop();
-    zoomStep(dir);
-    state.zoomHoldTimer = root.setInterval(function () {
-      var before = state.zoomIdx;
-      zoomStep(dir);
-      if (state.zoomIdx === before) zoomHoldStop();
-    }, AppCfg.ZOOM_HOLD_MS);
-  }
-
-  function zoomHoldStop() {
-    if (state.zoomHoldTimer) { root.clearInterval(state.zoomHoldTimer); state.zoomHoldTimer = null; }
-  }
-
-  /* ---------- 快门 ---------- */
+  /* ---------- 快门 / 拍摄序列（自拍定时 · 连拍 · 间隔定时） ---------- */
 
   function shutter() {
     U.lockPortrait();
-    if (state.mode === 'picture') takePhoto();
-    else toggleRecord();
+    if (cam.mode !== 'picture') { toggleRecord(); return; }
+    if (seq) { abortSeq(t('shotsStop')); return; }   /* 序列进行中再按快门 = 中止 */
+    startSeq();
   }
 
-  function takePhoto() {
-    if (!cam.control) return;
-    if (cam.recording) { UI.toast(t('recPhoto'), 2000); return; }   /* HAL 不支持边录边拍 */
+  /* 本次序列的张数与张间隔：连拍优先，其次间隔定时，否则单张 */
+  function seqPlan() {
+    if (shoot.burst > 1) return { total: shoot.burst, gap: 600 };
+    var m = /^(\d+)x(\d+)$/.exec(String(shoot.interval || ''));
+    if (m) return { total: parseInt(m[2], 10), gap: parseInt(m[1], 10) * 1000 };
+    return { total: 1, gap: 0 };
+  }
+
+  function startSeq() {
+    var plan = seqPlan();
+    seq = { total: plan.total, left: plan.total, timer: null, cd: null };
+    if (shoot.delay > 0) {
+      countdown(shoot.delay, function () { fireSeq(plan.gap); });
+    } else {
+      fireSeq(plan.gap);
+    }
+  }
+
+  function countdown(secs, done) {
+    var left = secs;
+    var show = function () {
+      UI.splash({ big: String(left), hint: t('pDelay') });
+    };
+    show();
+    seq.cd = root.setInterval(function () {
+      left--;
+      if (left <= 0) {
+        root.clearInterval(seq.cd);
+        seq.cd = null;
+        UI.splashHide(true);
+        done();
+        return;
+      }
+      show();
+    }, 1000);
+  }
+
+  function fireSeq(gap) {
+    takePhoto(function () {
+      if (!seq) return;                 /* 已中止 */
+      seq.left--;
+      if (seq.left <= 0) { finishSeq(); return; }
+      showSeqProgress();
+      seq.timer = root.setTimeout(function () { fireSeq(gap); }, gap);
+    });
+  }
+
+  function showSeqProgress() {
+    if (!seq) return;
+    UI.splash({
+      big: (seq.total - seq.left + 1) + '/' + seq.total,
+      sub: shoot.burst > 1 ? t('pBurst') : t('pInterval')
+    });
+  }
+
+  function finishSeq() {
+    var total = seq.total;
+    clearSeqTimer();
+    seq = null;
+    UI.splashHide(true);
+    UI.toast(t('shotsDone') + ' ' + total + t('kShots'), 1500);
+  }
+
+  function abortSeq(msg) {
+    if (!seq) return;
+    clearSeqTimer();
+    seq = null;
+    UI.splashHide(true);
+    if (msg) UI.toast(msg, 1200);
+  }
+
+  function clearSeqTimer() {
+    if (!seq) return;
+    if (seq.cd) { root.clearInterval(seq.cd); seq.cd = null; }
+    if (seq.timer) { root.clearTimeout(seq.timer); seq.timer = null; }
+  }
+
+  /* 单张拍照；done 用于序列（不逐张弹提示，改由中央块显示进度） */
+  function takePhoto(done) {
+    if (!cam.control) { if (done) done(); return; }
+    if (cam.recording) { UI.toast(t('recPhoto'), 2000); if (done) done(); return; }   /* HAL 不支持边录边拍 */
     UI.flash();
     cam.takePicture().then(function (blob) {
       return cam.saveBlob(blob, 'pictures', cam.photoFilename());
     }).then(function () {
-      dlog('✓ 照片已存 ' + cam.photoFilename());
-      UI.toast(t('saved'));
+      Dbg.log('✓ 照片已存 ' + cam.photoFilename());
+      if (done) done(); else UI.toast(t('saved'));
     }).catch(function (err) {
-      dlog('✗ 拍照/保存: ' + (err && err.message));
+      Dbg.log('✗ 拍照/保存: ' + (err && err.message));
       UI.toast(err.message || t('saveFail'), 2500);
+      if (done) done();
     });
   }
 
@@ -469,10 +503,10 @@
         UI.hud({ rec: t('recHud') + '00:00' });
         state.recTimer = root.setInterval(function () {
           state.recSecs++;
-          UI.hud({ rec: t('recHud') + fmtTime(state.recSecs) });
+          UI.hud({ rec: t('recHud') + F.fmtTime(state.recSecs) });
         }, 1000);
       }).catch(function (err) {
-        dlog('✗ 录像: ' + (err && err.message));
+        Dbg.log('✗ 录像: ' + (err && err.message));
         UI.toast(err.message || t('recFail'));
       });
     } else {
@@ -487,30 +521,22 @@
     if (state.recTimer) { root.clearInterval(state.recTimer); state.recTimer = null; }
   }
 
-  function fmtTime(s) {
-    var m = Math.floor(s / 60);
-    var r = s % 60;
-    return (m < 10 ? '0' : '') + m + ':' + (r < 10 ? '0' : '') + r;
-  }
-
   /* ---------- 模式切换 / 变焦 / 曝光补偿 ---------- */
 
   function switchMode() {
     if (cam.recording) { UI.toast(t('recording')); return; }
-    var target = (state.mode === 'picture') ? 'video' : 'picture';
-    var prev = state.mode;
-    state.mode = target;
-    cam.mode = target;
+    var target = (cam.mode === 'picture') ? 'video' : 'picture';
+    var prev = cam.mode;
+    cam.setMode(target);
     UI.hud({ mode: target === 'video' ? t('modeVideo') : t('modePhoto') });
-    dlog('切换模式 → ' + target);
+    Dbg.log('切换模式 → ' + target);
     cam.switchMode(target, U.byId('preview')).then(function () {
-      dlog('✓ 模式已切换');
+      Dbg.log('✓ 模式已切换');
       setupZoomAndEc();
       renderHudParams();
     }).catch(function (err) {
-      dlog('✗ 切换失败: ' + (err && err.message));
-      state.mode = prev;
-      cam.mode = prev;
+      Dbg.log('✗ 切换失败: ' + (err && err.message));
+      cam.setMode(prev);
       UI.hud({ mode: prev === 'video' ? t('modeVideo') : t('modePhoto') });
       cam.switchMode(prev, U.byId('preview')).catch(function () {});
       UI.toast(t('switchFail'));
@@ -539,11 +565,25 @@
     }
   }
 
+  /* 连续变焦：按下启动（先立即走一档，再按周期）；松开即停；到顶/到底自动停 */
+  function zoomHoldStart(dir) {
+    zoomHoldStop();
+    zoomStep(dir);
+    state.zoomHoldTimer = root.setInterval(function () {
+      var before = state.zoomIdx;
+      zoomStep(dir);
+      if (state.zoomIdx === before) zoomHoldStop();
+    }, AppCfg.ZOOM_HOLD_MS);
+  }
+
+  function zoomHoldStop() {
+    if (state.zoomHoldTimer) { root.clearInterval(state.zoomHoldTimer); state.zoomHoldTimer = null; }
+  }
+
   function zoomStep(d) {
     if (state.zoomRatios.length < 2) { UI.toast(t('zoom') + ' ' + t('na')); return; }
     state.zoomIdx = Math.min(state.zoomRatios.length - 1, Math.max(0, state.zoomIdx + d));
-    var r = state.zoomRatios[state.zoomIdx];
-    cam.setParam('zoom', r);
+    cam.setParam('zoom', state.zoomRatios[state.zoomIdx]);
     renderHudParams();
   }
 
@@ -569,11 +609,13 @@
     renderHudParams();
   }
 
+  /* ---------- 界面状态（顶部状态行 + 底部信息条） ---------- */
+
   function renderHudParams() {
     var caps = cam.capabilities();
     var NB = '\u00A0';   /* 标签与取值之间用不换行空格：折行只发生在 · 分隔处 */
     /* 只显示"改过"的值：自动/0 这类默认值不占 HUD（要看全部值去参数菜单），
-     * 这样底部通常只有一行，宁缺毋滥 */
+     * 这样底栏通常只有右下角的变焦条 */
     var DEF = /^(auto|自动)$/i;
     var parts = [];
     if (caps.whiteBalanceModes.length) {
@@ -585,29 +627,12 @@
       if (iso !== undefined && iso !== null && !DEF.test(String(iso))) parts.push(t('hudIso') + NB + tval(iso));
     }
     if (state.ecList.length && Number(state.ecNow) !== 0) {
-      parts.push(t('hudEc') + NB + fmtEc(state.ecNow));
+      parts.push(t('hudEc') + NB + F.fmtEc(state.ecNow));
     }
     UI.hud({
       param: parts.join(' · '),
-      /* 变焦条只在 HAL 支持变焦时出现；版本号不占 HUD（见"关于"页） */
       zoom: (state.zoomRatios.length > 1) ? ('×' + state.zoomRatios[state.zoomIdx]) : ''
     });
-  }
-
-  /* 电量换算：raw = 电池组电压×10mV（3S 18650）→ 单节电压查放电曲线得剩余百分比 */
-  function battPct(raw) {
-    var curve = AppCfg.BATT_CELL_CURVE;
-    if (!curve || !curve.length) return 0;
-    var mv = raw * 10 / 3;                     /* 单节电压（mV） */
-    if (mv >= curve[0][0]) return curve[0][1];
-    for (var i = 1; i < curve.length; i++) {
-      if (mv >= curve[i][0]) {
-        var hi = curve[i - 1], lo = curve[i];
-        var k = (mv - lo[0]) / (hi[0] - lo[0]);
-        return Math.round(lo[1] + k * (hi[1] - lo[1]));
-      }
-    }
-    return 0;
   }
 
   /* 模式码 → 名称（PF/L/F/POV/GO；未登记的返回 null） */
@@ -618,224 +643,55 @@
 
   /* 顶部状态行：连接状态文本 +（连上且已知时）云台电量与模式，如「云台已连接 10% F」 */
   function setHudBle(txt) {
-    state.bleText = txt;
+    link.bleText = txt;
     renderHudBle();
   }
 
   function renderHudBle() {
     /* 云台休眠/无应答时不显示陈旧的缓存电量与模式，直接说明现状 */
-    if (state.gimbalConnected && !state.gimbalAlive) {
+    if (link.connected && !link.alive) {
       UI.hud({ ble: t('gimbalSilent') });
       return;
     }
-    var txt = state.bleText || '';
-    if (state.gimbalConnected && state.gimbalBatt !== null) txt += ' ' + state.gimbalBatt + '%';
-    if (state.gimbalConnected && state.gimbalMode !== null) {
-      var m = modeName(state.gimbalMode);
-      txt += ' ' + (m || ('0x' + state.gimbalMode.toString(16)));   /* 未登记的码直接显示原值 */
+    var txt = link.bleText || '';
+    if (link.connected && link.batt !== null) txt += ' ' + link.batt + '%';
+    if (link.connected && link.mode !== null) {
+      var m = modeName(link.mode);
+      txt += ' ' + (m || ('0x' + link.mode.toString(16)));   /* 未登记的码直接显示原值 */
     }
     UI.hud({ ble: txt });
   }
 
-  /* 曝光补偿显示：最多两位小数并去掉尾零（0.5 → +0.5，-1 → -1），避免浮点长串 */
-  function fmtEc(v) {
-    var n = Math.round(Number(v) * 100) / 100;
-    var s = String(n).replace(/(\.\d*?)0+$/, '$1').replace(/\.$/, '');
-    return (n > 0 ? '+' : '') + s;
-  }
-
-  /* ---------- 构图辅助线（* 键或参数菜单循环：关/九宫格/黄金分割/中心十字/对角线；设置持久化） ---------- */
-
-  var GRID_KEY = 'zyGrid';
-  var GRID_MODES = ['off', 'thirds', 'golden', 'cross', 'diag'];
-  var GRID_LABELS = {
-    off: 'gridOff', thirds: 'gridThirds', golden: 'gridGolden', cross: 'gridCross', diag: 'gridDiag'
-  };
-
-  function loadGrid() {
-    try {
-      var v = root.localStorage && root.localStorage.getItem(GRID_KEY);
-      if (v === '1' || v === 'true') return 'thirds';        /* v8.2 的布尔值 */
-      return (GRID_MODES.indexOf(v) >= 0) ? v : 'off';
-    } catch (e) { return 'off'; }
-  }
-
-  function gridText() { return t(GRID_LABELS[state.grid] || 'gridOff'); }
-
-  function applyGrid() {
-    var el = U.byId('grid-overlay');
-    if (!el) return;
-    var mode = state.grid;
-    el.textContent = '';
-    if (mode === 'off') { U.show('grid-overlay', false); return; }
-    var mk = function (cls, style) {
-      var d = root.document.createElement('div');
-      d.className = cls;
-      if (style) d.setAttribute('style', style);
-      el.appendChild(d);
-    };
-    if (mode === 'diag') {
-      mk('gdiag1'); mk('gdiag2');
-    } else {
-      var at = (mode === 'cross') ? [50] : (mode === 'golden' ? [38.2, 61.8] : [33.333, 66.667]);
-      at.forEach(function (p) {
-        mk('gv', 'left:' + p + '%');
-        mk('gh', 'top:' + p + '%');
-      });
-    }
-    U.show('grid-overlay', true);
-  }
-
-  /* 切到上/下一种辅助线（d=+1 下一种、-1 上一种）；视觉变化本身够明显，不弹提示 */
-  function cycleGrid(d) {
-    var n = GRID_MODES.length;
-    var i = GRID_MODES.indexOf(state.grid);
-    if (i < 0) i = 0;
-    state.grid = GRID_MODES[((i + (d || 1)) % n + n) % n];
-    try { root.localStorage.setItem(GRID_KEY, state.grid); } catch (e) { /* 无存储 */ }
-    applyGrid();
-  }
-
-  /* ---------- 参数菜单 ---------- */
+  /* ---------- 参数菜单（内容在 menu.js，这里只提供上下文与二级页） ---------- */
 
   function openMenu() {
     if (!cam.control) { UI.toast(t('camAllFail')); return; }
-    var caps = cam.capabilities();
-    var items = [];
-
-    function addCycle(labelKey, values, paramKey, fmt) {
-      if (!values || !values.length) return;
-      fmt = fmt || textOf;
-      var item = {
-        label: t(labelKey),
-        valueText: fmt(cam.getParam(paramKey)),
-        cycle: function (d) {
-          var cur = cam.getParam(paramKey);
-          var idx = values.indexOf(cur);
-          idx = (idx === -1) ? 0 : (idx + d + values.length) % values.length;
-          cam.setParam(paramKey, values[idx]);
-          item.valueText = fmt(values[idx]);
-          UI.refreshMenu();
-        }
-      };
-      items.push(item);
-    }
-
-    function textOf(v) {
-      if (v === undefined || v === null || v === '') return '-';
-      if (v.width) return v.width + '×' + v.height;
-      return tval(v);
-    }
-
-    /* 录像规格：分辨率+码率相同的档位只留一个（真机上高/默认/480p 都是 720×480@2Mbps），
-     * 保留优先级 default > high > 480p > low > …；再按分辨率从大到小排序，←→ 沿画质走 */
-    var PROF_PREFER = ['default', 'high', '480p', 'low', 'qvga', 'cif', 'qcif'];
-    function profKey(n) {
-      var sz = (caps.recorderProfileSizes || {})[n] || n;
-      return sz + '@' + ((caps.recorderProfileBps || {})[n] || 0);
-    }
-    function profileValues() {
-      var sz = caps.recorderProfileSizes || {};
-      var px = function (n) { var m = /^(\d+)×(\d+)$/.exec(sz[n] || ''); return m ? (+m[1]) * (+m[2]) : 0; };
-      var list = (caps.recorderProfiles || []).slice().sort(function (a, b) {
-        var d = px(b) - px(a);
-        if (d) return d;
-        var ia = PROF_PREFER.indexOf(a), ib = PROF_PREFER.indexOf(b);
-        ia = (ia < 0) ? PROF_PREFER.length : ia;
-        ib = (ib < 0) ? PROF_PREFER.length : ib;
-        return ia - ib || (a < b ? -1 : (a > b ? 1 : 0));
-      });
-      var kept = [], seen = {};
-      list.forEach(function (n) {
-        var k = profKey(n);
-        if (seen[k]) return;
-        seen[k] = 1;
-        kept.push(n);
-      });
-      return kept;
-    }
-
-    /* 当前档位若被去重掉（如 high），切到等价的保留项，菜单与实拍保持一致 */
-    var profValues = profileValues();
-    var curProf = cam.getParam('recorderProfile');
-    if (curProf && profValues.indexOf(curProf) < 0) {
-      for (var pj = 0; pj < profValues.length; pj++) {
-        if (profKey(profValues[pj]) === profKey(curProf)) { cam.setParam('recorderProfile', profValues[pj]); break; }
-      }
-    }
-
-    function profText(v) {
-      if (v === undefined || v === null || v === '') return '-';
-      var sz = (caps.recorderProfileSizes || {})[v];
-      return tval(v) + (sz ? ' ' + sz : '');
-    }
-
-    addCycle('pWhiteBalance', caps.whiteBalanceModes, 'whiteBalance');
-    addCycle('pIso', caps.isoModes, 'iso');
-    addCycle('pScene', caps.sceneModes, 'scene');
-    addCycle('pEffect', caps.effects, 'effect');
-    addCycle('pFlash', caps.flashModes, 'flash');
-    addCycle('pFocus', caps.focusModes, 'focus');
-    addCycle('pProfile', profValues, 'recorderProfile', profText);
-    if (caps.pictureSizes.length) {
-      var sizes = caps.pictureSizes;
-      var item = {
-        label: t('pSize'),
-        valueText: textOf(cam.getParam('pictureSize')),
-        cycle: function (d) {
-          var cur = cam.getParam('pictureSize');
-          var curStr = textOf(cur);
-          var idx = 0;
-          for (var i = 0; i < sizes.length; i++) {
-            if (sizes[i].width + '×' + sizes[i].height === curStr) { idx = i; break; }
-          }
-          idx = (idx + d + sizes.length) % sizes.length;
-          cam.setParam('pictureSize', sizes[idx]);
-          item.valueText = textOf(sizes[idx]);
-          UI.refreshMenu();
-        }
-      };
-      items.push(item);
-    }
-    if (state.ecList.length) {
-      var ecItem = {
-        label: t('pEc'),
-        valueText: fmtEc(state.ecNow),
-        cycle: function (d) {
-          var idx = state.ecList.indexOf(state.ecNow);
-          if (idx === -1) idx = state.ecList.indexOf(0);
-          if (idx === -1) idx = 0;
-          idx = (idx + d + state.ecList.length) % state.ecList.length;
-          state.ecNow = state.ecList[idx];
-          cam.setParam('ec', state.ecNow);
-          ecItem.valueText = fmtEc(state.ecNow);
-          UI.refreshMenu();
-        }
-      };
-      items.push(ecItem);
-    }
-    if (!items.length) items.push({ label: t('noParams'), valueText: '' });
-    /* 构图辅助线（←→ 循环）与关于（中键/→ 进入二级页） */
-    items.push({
-      label: t('grid'),
-      valueText: gridText(),
-      cycle: function (d) {
-        cycleGrid(d);
-        this.valueText = gridText();
-        UI.refreshMenu();
-      }
+    Menu.open({
+      cam: cam,
+      caps: cam.capabilities(),
+      appVersion: APP_VERSION,
+      ec: {
+        list: state.ecList,
+        get: function () { return state.ecNow; },
+        set: function (v) { state.ecNow = v; cam.setParam('ec', v); }
+      },
+      shoot: {
+        get: function () { return shoot; },
+        set: function (k, v) { shoot[k] = v; }
+      },
+      grid: {
+        text: function () { return Grid.text(); },
+        cycle: function (d) { Grid.cycle(d); }
+      },
+      about: { open: openAbout }
     });
-    items.push({
-      label: t('about'),
-      valueText: APP_VERSION,
-      open: function () { openAbout(); }
-    });
-
-    UI.openMenu(items);
-    UI.setSoftkeys(t('skBack'), t('skClose'), t('skMode'));
   }
 
-  /* ---------- 关于页 ---------- */
+  function closeMenu() {
+    UI.closeMenu();
+    setFinderKeys();
+    renderHudParams();
+  }
 
   function openAbout() {
     UI.renderAbout(APP_VERSION);
@@ -846,12 +702,6 @@
   function closeAbout() {
     UI.showView('menu');
     UI.setSoftkeys(t('skBack'), t('skClose'), t('skMode'));
-  }
-
-  function closeMenu() {
-    UI.closeMenu();
-    setFinderKeys();
-    renderHudParams();
   }
 
   /* ---------- 按键 ---------- */
@@ -874,9 +724,7 @@
       return;
     }
     if (k === '#') {
-      state.debugOn = !state.debugOn;
-      state.debugScroll = 0;
-      renderDebug();
+      Dbg.toggle();
       return;
     }
     if (UI.menuActive()) {
@@ -898,12 +746,8 @@
       return;
     }
     /* 面板打开时 ↑↓ 翻日志历史（不切变焦），否则还是变焦 */
-    if (state.debugOn && (k === 'ArrowUp' || k === 'ArrowDown')) {
-      var lines = cam.getLog().concat(state.appLog);
-      var max = debugMaxScroll(lines.length);
-      var next = state.debugScroll + (k === 'ArrowUp' ? 1 : -1);
-      state.debugScroll = Math.max(0, Math.min(max, next));
-      renderDebug();
+    if (Dbg.active() && (k === 'ArrowUp' || k === 'ArrowDown')) {
+      Dbg.scrollBy(k === 'ArrowUp' ? 1 : -1);
       e.preventDefault();
       return;
     }
@@ -911,14 +755,14 @@
       case 'SoftLeft': openMenu(); break;
       case 'SoftRight': switchMode(); break;
       case 'Enter': shutter(); break;
+      case '0': shutter(); break;               /* 单手位：等同快门（含定时/连拍/间隔设置） */
       case 'ArrowUp': case '2': zoomStep(1); e.preventDefault(); break;
       case 'ArrowDown': case '8': zoomStep(-1); e.preventDefault(); break;
       case 'ArrowLeft': case '4': ecStep(-1); e.preventDefault(); break;
       case 'ArrowRight': case '6': ecStep(1); e.preventDefault(); break;
       case '1': cycleQuickParam('whiteBalance'); break;
       case '3': cycleQuickParam('iso'); break;
-      case '*': cycleGrid(1); break;
-      case '0': if (AppCfg.DEBUG) askBattery(); break;
+      case '*': Grid.cycle(1); break;
       case '5': if (AppCfg.DEBUG) sayHello(); break;
       case '7': if (AppCfg.DEBUG) motionTest(); break;
       case '9': retryCamera(); break;
@@ -928,9 +772,10 @@
   /* 取景界面按返回键退出应用 */
   function exitApp() {
     zoomHoldStop();
+    abortSeq();
     stopQueries();
     stopCountdown();
-    if (session) { session.close(); session = null; }
+    if (link.session) { link.session.close(); link.session = null; }
     if (cam.recording) { cam.stopRecording(); stopRecTimer(); }
     try { root.close(); } catch (e) { /* 非脚本可关时忽略 */ }
     root.setTimeout(function () {
@@ -945,18 +790,19 @@
         stopRecTimer();
         UI.hud({ rec: '' });
       }
+      abortSeq();
       cam.stopPreview();
       /* 后台降级：屏幕/相机都停了，周期查询与 10Hz 收包轮询基本无意义 → 停查询、放宽轮询 */
       stopQueries();
-      if (session) session.setPollMs(AppCfg.POLL_HIDDEN_MS || 500);
+      if (link.session) link.session.setPollMs(AppCfg.POLL_HIDDEN_MS || 500);
     } else {
       goFullscreen();
       U.lockPortrait();
       if (cam.control) {
         cam.startPreview(U.byId('preview')).catch(function () {});
       }
-      if (session) {
-        session.setPollMs(AppCfg.POLL_MS);
+      if (link.session) {
+        link.session.setPollMs(AppCfg.POLL_MS);
         startQueries();       /* 回前台恢复查询；lastFrameAt 会在首个回包时刷新 */
       }
     }

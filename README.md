@@ -3,6 +3,12 @@
 Nokia 2720 Flip（KaiOS 2.5，旧固件 build 22-）上的 privileged 应用：通过 BLE 连接智云云鹤 M2 云台，
 把云台按键映射为手机相机的快门/录像，并提供键盘可调的相机参数（ISO/白平衡/曝光补偿等，按 HAL 实际能力生成，取值显示中文）。
 
+取景界面（240×320 实尺寸）
+
+| 取景 | 参数菜单 | 关于 |
+|---|---|---|
+| ![取景](docs/img/finder.png) | ![菜单](docs/img/menu.png) | ![关于](docs/img/about.png) |
+
 ## 目录
 
 ```
@@ -10,6 +16,7 @@ app/            主应用（manifest type=privileged；权限 bluetooth / camera
 tools/probe/    BLE 探针应用（先装它：枚举云台 GATT、监听并显示按键原始字节）
 docs/           install-2720.md 装机指南；protocol.md 协议笔记（实测数据填这里）
 scripts/        build.js（语法检查 + 协议自测 + 打包 zip）、make-icons.js
+CHANGELOG.md    版本历史（与 Releases 对应）
 dist/           构建产物 zy-kaimc.zip / zy-probe.zip
 ```
 
@@ -25,13 +32,17 @@ dist/           构建产物 zy-kaimc.zip / zy-probe.zip
 ## 构建
 
 ```
-node scripts/build.js          # 语法 + 协议自测 + 同步共享 JS + 打包
+node scripts/build.js          # 一键：语法 + 各项自检 + 单元/会话测试 + 同步共享 JS + 打包
+node scripts/test-units.js     # 纯函数单测（格式/换算/文件名/键位分发/辅助线循环）
 node scripts/test-session.js   # 会话层仿真回归（假适配器，不碰真机）
 ```
 
 自动完成：全部 JS 语法检查、manifest 校验、协议自测（含 ZY Play 抓包回归）、**悬空成员检查**
-（模块导出的成员 vs 全仓成员访问，专防"函数被删、调用还在"这类回归——`U.withTimeout` 事件就是它没在）
-、共享 JS 同步到探针、版本一致性自检（HUD 版本 ↔ manifest 版本）、打包。无任何 npm 依赖。
+（模块导出的成员 vs 全仓成员访问，专防"函数被删、调用还在"这类回归——`U.withTimeout` 事件就是它没拦住）、
+**i18n 检查**（zh/en 键集合一致、`t('…')` 的键必须存在、未引用键提醒）、**共享 JS 漂移检测**
+（探针侧被改动会当场失败，不再被静默覆盖；基线在 `tools/probe/.sync-state.json`）、
+**HTML 脚本图检查**（脚本都存在、顺序满足依赖、`app/js` 下每个文件都被引用）、
+版本一致性（APP_VERSION ↔ manifest）、单元/会话测试、打包。无任何 npm 依赖。
 
 产物：`dist/zy-kaimc-<版本>.zip`（**交付件**）＋ `dist/zy-kaimc.zip`（最新副本，供脚本/文档引用）；
 探针同理 `zy-probe-<版本>.zip` / `zy-probe.zip`。
@@ -61,11 +72,14 @@ node scripts/test-session.js   # 会话层仿真回归（假适配器，不碰�
 | 右软键 | 拍照 ↔ 录像 模式切换 |
 | ↑↓（取景时） | 变焦（HAL 支持时） |
 | ←→（取景时） | 曝光补偿 |
+| 0 | 快门（与 OK 同；配合菜单里的自拍定时/连拍/间隔定时） |
 | 1 / 3 | 循环白平衡 / ISO |
 | * | 依次切换构图辅助线：关 → 九宫格 → 黄金分割 → 中心十字 → 对角线（菜单里同项可切，设置会记住） |
 | 9 | 重试相机初始化 |
 | # | 开/关屏幕调试面板（相机与 BLE 每步日志，最新一条在最上面）；面板打开时 ↑↓ 翻日志历史（此时不切变焦） |
 | 返回键 | 菜单中=关闭菜单；取景界面=退出应用 |
+
+**拍摄扩展**（参数菜单里设置，会话内存续）：**自拍定时** 关/3/5/10 秒；**连拍** 关/3/5 张（约 600ms 一张）；**间隔定时** 关/5秒×3/10秒×5/30秒×10。进行中中央块显示进度，**再按快门即中止**。
 
 ## 当前状态与风险
 

@@ -13,10 +13,25 @@
     this.which = null;
     this.control = null;
     this.caps = null;
+    this._capsCache = null;     /* capabilities() 结果缓存（模式切换/重开时失效） */
     this.previewStream = null;
     this.recording = false;
     this.logLines = [];
   }
+
+  /* ---------- 公共生命周期 API（上层不再直接摸 control/mode） ---------- */
+
+  /* 释放相机（退出/重试前必须调用，否则 HAL 挂起直到重启） */
+  Cam.prototype.release = function () {
+    try { if (this.control) this.control.release(); } catch (e) { /* 已释放 */ }
+    this.control = null;
+    this._capsCache = null;
+  };
+
+  Cam.prototype.setMode = function (m) {
+    this.mode = m;
+    this._capsCache = null;     /* 不同模式的能力清单可能不同 */
+  };
 
   /* 提取底层报错（去掉冗长前缀），让面板单行放得下 */
   function why(e) {
@@ -95,6 +110,7 @@
           if (!control) throw new Error('返回为空');
           self.control = control;
           self.caps = control.capabilities || {};
+          self._capsCache = null;         /* 新 control → 能力清单缓存作废 */
           if (!control.capabilities) self.dbg('⚠ 无capabilities属性');
           self.dbg('✓ ' + tag);
           self._logCaps();
@@ -158,9 +174,11 @@
     } catch (e) { /* 该机型不支持 */ }
   };
 
-  /* 能力清单（参数菜单据此生成）。KaiOS 2720 实测：capabilities 为空对象，
-   * 但白平衡/变焦/曝光补偿属性本身可读写 → 为空时给保守候选值兜底，以回读值为准。 */
+  /* 能力清单（参数菜单/HUD 据此生成）。KaiOS 2720 实测：capabilities 为空对象，
+   * 但白平衡/变焦/曝光补偿属性本身可读写 → 为空时给保守候选值兜底，以回读值为准。
+   * 结果缓存：变焦杆按住时每 180ms 就会调一次，不做缓存等于每次重建十几个数组 */
   Cam.prototype.capabilities = function () {
+    if (this._capsCache) return this._capsCache;
     var c = this.caps || {};
     var nonEmpty = function (a) { return (a && a.length) ? a : []; };
     /* KaiOS 的 recorderProfiles 是对象（键=profile 名），统一转数组；
@@ -213,6 +231,7 @@
       out.ecMax = 2;
       out.ecStep = 0.5;
     }
+    this._capsCache = out;
     return out;
   };
 
@@ -487,7 +506,7 @@
         }).then(function () {
           return new Promise(function (res) { root.setTimeout(res, 300); });
         }).then(function () {
-          var filename = videoFilename(profile);
+          var filename = root.KaiFmt.videoName();
           try {
             var p = c.startRecording({ rotation: 0, maxFileSizeBytes: 536870912, createPoster: false },
               storage, filename);
@@ -518,7 +537,7 @@
     }
     if (!profile2 && profiles2.length) profile2 = profiles2[profiles2.length - 1];
     if (profile2) cfg.recorderProfile = profile2;
-    var filename2 = videoFilename(profile2);
+    var filename2 = root.KaiFmt.videoName();
     var meta = { filename: filename2 };
     return new Promise(function (resolve, reject) {
       var done = false;
@@ -550,6 +569,7 @@
   Cam.prototype.switchMode = function (mode, videoEl) {
     var self = this;
     this.mode = (mode === 'video') ? 'video' : 'picture';
+    this._capsCache = null;       /* 模式变了 → 能力清单缓存作废 */
     var c = this.control;
     if (c && typeof c.setConfiguration === 'function' && typeof c.getPreviewStream !== 'function') {
       return new Promise(function (resolve, reject) {
@@ -581,26 +601,10 @@
       .then(function () { return self.startPreview(videoEl); });
   };
 
+  /* 文件名规则统一在 format.js（KaiFmt）：纯函数、可单测（录像必须是 .3gp 这条是硬规则） */
   Cam.prototype.photoFilename = function () {
-    return 'DCIM/ZYKaiCam/IMG_' + stamp() + '.jpg';
+    return root.KaiFmt.photoName();
   };
-
-  function stamp() {
-    var d = new Date();
-    var p = function (n, w) {
-      var s = String(n);
-      while (s.length < (w || 2)) s = '0' + s;
-      return s;
-    };
-    return d.getFullYear() + p(d.getMonth() + 1) + p(d.getDate()) +
-      '_' + p(d.getHours()) + p(d.getMinutes()) + p(d.getSeconds());
-  }
-
-  function videoFilename(profile) {
-    /* 实测（2720）：KaiOS 播放器只对 .3gp 文件应用 tkhd 旋转矩阵，
-     * .mp4 同样的内容会横转 90° 播放 → 与系统相机一致使用 .3gp */
-    return 'DCIM/ZYKaiCam/VID_' + stamp() + '.3gp';
-  }
 
   root.KaiCam = new Cam();
 })(typeof window !== 'undefined' ? window : globalThis);

@@ -13,7 +13,7 @@
       <div id="grid-overlay" class="hidden"></div>
       <div id="hud-top">
         <span id="hud-ble">…</span>
-        <span id="hud-rec" class="hidden">● REC</span>
+        <span id="hud-rec" class="hidden">● 录像</span>
         <span id="hud-mode">…</span>
       </div>
       <div id="hud-bottom">
@@ -22,7 +22,6 @@
       </div>
       <div id="debug" class="hidden"></div>
       <div id="flash-overlay"></div>
-      <div id="toast" class="hidden"></div>
     </div>
 
     <div id="menu-view" class="view hidden">
@@ -35,6 +34,15 @@
       <div id="about-body"></div>
     </div>
 
+    <!-- 不属于任何 view：菜单/关于页里也要能看见 -->
+    <div id="toast" class="hidden"></div>
+    <div id="splash" class="hidden">
+      <div id="splash-title"></div>
+      <div id="splash-big" class="hidden"></div>
+      <div id="splash-sub" class="hidden"></div>
+      <div id="splash-hint" class="hidden"></div>
+    </div>
+
     <div id="softkey-bar">
       <span id="sk-left"></span>
       <span id="sk-center"></span>
@@ -44,6 +52,7 @@
 
   <script src="js/config.js"></script>
   <script src="js/util.js"></script>
+  <script src="js/format.js"></script>
   <script src="js/strings.js"></script>
   <script src="js/zhiyun.js"></script>
   <script src="js/ble.js"></script>
@@ -51,6 +60,9 @@
   <script src="js/buttons.js"></script>
   <script src="js/camera.js"></script>
   <script src="js/ui.js"></script>
+  <script src="js/grid.js"></script>
+  <script src="js/debug.js"></script>
+  <script src="js/menu.js"></script>
   <script src="js/main.js"></script>
 </body>
 </html>

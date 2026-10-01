@@ -1,0 +1,8 @@
+{
+  "config.js": "812faf3af83017ef2c5d3ce8a5904117a351b6c3",
+  "util.js": "89523c3261db1589cf0b453c1678297e33f7af38",
+  "ble.js": "f18cbf9febedd76b18377c8ac9973b9d33b09d58",
+  "session.js": "39c61e8591c539903d1b4f2769491a5ceca3909d",
+  "buttons.js": "14d4f5bc933a2e5a516ce2c03b95efc1cac6ed1c",
+  "zhiyun.js": "af41db776403f886cfb894b5522448245e3f7349"
+}
