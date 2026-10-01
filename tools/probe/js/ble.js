@@ -206,15 +206,60 @@
     });
   };
 
-  /* 尽力打开通知。KaiOS 实机可能不派发事件（kaios.dev 实测），调用方必须做 readValue 轮询兜底 */
+  /* 检查并（必要时）手动打开通知 CCCD(0x2902)。
+   * KaiOS 的 startNotifications() 可能是空壳：CCCD 不写 0x0001，云台永远不会发通知 */
+  Bt.prototype.ensureNotifyCccd = function (con) {
+    var ch = con.notifyChar;
+    var info = { props: null, desc: false, cccd: '', wrote: '' };
+    try { info.props = ch.properties; } catch (e) { /* 无该属性 */ }
+    var d = null, ds = [];
+    try { ds = ch.descriptors || []; } catch (e) { ds = []; }
+    for (var i = 0; i < ds.length; i++) {
+      if (String(ds[i].uuid || '').toLowerCase().indexOf('2902') !== -1) { d = ds[i]; break; }
+    }
+    if (!d) { info.cccd = 'no-2902'; return Promise.resolve(info); }
+    info.desc = true;
+    var readBack = function () {
+      return U.prom(d.readValue(), 'cccd.readValue').then(function () {
+        var v = new Uint8Array(d.value || []);
+        info.cccd = v.length ? U.hex(v) : '(empty)';
+      }, function (e) {
+        info.cccd = 'read-err:' + ((e && (e.message || e.name)) || 'unknown');
+      });
+    };
+    return readBack().then(function () {
+      if (info.cccd === '01' || info.cccd === '02') return info;
+      /* 有通知属性(0x10)写 0x0001；只有指示(0x20)写 0x0002 */
+      var enable = (typeof info.props === 'number' && (info.props & 0x20) && !(info.props & 0x10)) ? 2 : 1;
+      var buf = new Uint8Array([enable, 0x00]).buffer;
+      return U.prom(d.writeValue(buf), 'cccd.writeValue').then(function () {
+        info.wrote = '0x' + enable;
+        return readBack();
+      }, function (e) {
+        info.wrote = 'err:' + ((e && (e.message || e.name)) || 'unknown');
+      });
+    });
+  };
+
+  /* 尽力打开通知。KaiOS 实机可能不派发事件（kaios.dev 实测），调用方必须做 readValue 轮询兜底。
+   * resolve 通知状态 info：{props, desc, cccd, wrote, startErr?}（不再 reject，交给调用方展示） */
   Bt.prototype.armNotifications = function (con, onValue) {
+    var self = this;
     var gatt = con.gatt;
     var handler = function (e) {
       if (e && e.value) onValue(e.value, 'NOTIFY');
     };
     try { gatt.oncharacteristicchanged = handler; } catch (e) { /* 属性只读等情况 */ }
     try { gatt.addEventListener('characteristicchanged', handler); } catch (e) {}
-    return U.prom(con.notifyChar.startNotifications(), 'startNotifications');
+    var started = U.prom(con.notifyChar.startNotifications(), 'startNotifications')
+      .then(function () { return null; },
+        function (e) { return (e && (e.message || e.name)) || 'unknown'; });
+    return started.then(function (startErr) {
+      return self.ensureNotifyCccd(con).then(function (info) {
+        if (startErr) info.startErr = startErr;
+        return info;
+      });
+    });
   };
 
   Bt.prototype.write = function (con, arrayBuffer) {

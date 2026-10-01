@@ -26,6 +26,7 @@
     reconnectTimer: null,
     lastPollVal: null,
     gimbalBatt: null,
+    rxCount: 0,
     recTimer: null,
     recSecs: 0,
     zoomRatios: [],
@@ -176,17 +177,24 @@
       }
       dlog('✓ GATT 连接，服务 ' + con.services.length + ' 个');
       state.conn = con;
+      state.rxCount = 0;
       state.client = new Z.Client(function (buf) { return bt.write(con, buf); }, {
         onFrame: onGimbalFrame,
         onButton: onGimbalButton
       });
       return bt.armNotifications(con, function (val) { state.client.feed(val); })
-        .then(function () { dlog('notify 已开启'); })
-        .catch(function (e) { dlog('notify 不可用(' + e.message + ')，仅轮询'); })
+        .then(function (ni) {
+          var s = 'notify: props=' + (typeof ni.props === 'number' ? '0x' + ni.props.toString(16) : '?') +
+            ' cccd=' + (ni.desc ? ni.cccd : 'no-2902');
+          if (ni.wrote) s += ' 手动写=' + ni.wrote;
+          if (ni.startErr) s += ' startErr=' + ni.startErr;
+          dlog(s);
+        })
+        .catch(function (e) { dlog('notify 检查异常(' + ((e && e.message) || e) + ')'); })
         .then(function () {
           startPolling();
           state.client.startHeartbeat(1000);
-          dlog('✓ 云台就绪(心跳1s+轮询100ms)');
+          dlog('✓ 云台就绪(心跳1s)');
           UI.hud({ ble: t('connected') });
           UI.toast(t('connected'));
         });
@@ -287,6 +295,12 @@
   /* ---------- 云台事件 ---------- */
 
   function onGimbalFrame(f) {
+    state.rxCount++;
+    /* 抓字段：前 8 帧 + 之后每 25 帧打原始字节，确认云台实际发出什么 */
+    if (state.rxCount <= 8 || state.rxCount % 25 === 0) {
+      dlog('[IN#' + state.rxCount + '] ' + U.hex(f.raw) + ' cmd=0x' + f.cmd.toString(16) +
+        (f.crcOk ? '' : ' CRC✗'));
+    }
     if (!f.crcOk) return;
     /* 心跳/状态帧 payload 首字节常为电量（0-100），探针确认后可精修 */
     if (f.cmd === 0x80 && f.payload.length >= 1 && f.payload[0] <= 100) {

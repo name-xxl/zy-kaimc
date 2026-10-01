@@ -113,10 +113,16 @@
       return bt.armNotifications(con, function (v) {
         S.client.feed(v);
         log('[IN/NOTIFY] ' + U.hex(new Uint8Array(v)));
-      }).then(function () {
-        log('notify 已开启（若按键时无 NOTIFY 行 → 实机不支持通知，靠下方 POLL 轮询）');
+      }).then(function (ni) {
+        log('notify: props=' + (typeof ni.props === 'number' ? '0x' + ni.props.toString(16) : '?') +
+          ' cccd=' + (ni.desc ? ni.cccd : 'no-2902') +
+          (ni.wrote ? ' 手动写=' + ni.wrote : '') +
+          (ni.startErr ? ' startErr=' + ni.startErr : ''));
+        log((ni.cccd === '01' || ni.cccd === '02' || ni.wrote)
+          ? '通知已使能：按键时应出现 [IN/NOTIFY] 行（没有 → 实机不派发事件）'
+          : '⚠ CCCD 未开启：云台不会发通知，按键不会有 [IN] 行');
       }).catch(function (e) {
-        log('notify 开启失败(' + e.message + ')，仅靠 POLL 轮询');
+        log('notify 检查异常(' + ((e && e.message) || e) + ')');
       });
     }).then(function () {
       dumpAllChars();
@@ -137,6 +143,9 @@
     if (!con) return;
     con.services.forEach(function (s) {
       (s.characteristics || []).forEach(function (c) {
+        var descs = [];
+        try { descs = c.descriptors || []; } catch (e) { descs = []; }
+        descs.forEach(function (desc) { log('  DESC ' + shortUuid(desc.uuid)); });
         if (!canRead(c)) {
           log('[INIT] ' + shortUuid(c.uuid) + ' = (不可读，无 READ 位)');
           return;
