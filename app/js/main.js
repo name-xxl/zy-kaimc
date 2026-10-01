@@ -15,7 +15,7 @@
   /* 本文件只做编排：相机 + UI/键位 + 云台会话(KaiSession) + 按键分发(KaiButtons)。
    * 键码与时序常量见 config.js（AppCfg.KEY / AppCfg.*_MS） */
 
-  var APP_VERSION = 'v8.0';
+  var APP_VERSION = 'v8.1';
   var GIMBAL_NAME_RE = /CRANE[-_ ]?M2/i;
 
   var state = {
@@ -583,7 +583,8 @@
     }
     UI.hud({
       param: parts.join(' · '),
-      zoom: ((state.zoomRatios.length > 1 ? ('×' + state.zoomRatios[state.zoomIdx]) : '') + ' ' + APP_VERSION).trim()
+      /* 变焦条只在 HAL 支持变焦时出现；版本号不占 HUD（见"关于"页） */
+      zoom: (state.zoomRatios.length > 1) ? ('×' + state.zoomRatios[state.zoomIdx]) : ''
     });
   }
 
@@ -712,8 +713,27 @@
       items.push(ecItem);
     }
     if (!items.length) items.push({ label: t('noParams'), valueText: '' });
+    /* 末项：关于（Enter 进入二级页，展示版本号与项目地址） */
+    items.push({
+      label: t('about'),
+      valueText: APP_VERSION,
+      open: function () { openAbout(); }
+    });
 
     UI.openMenu(items);
+    UI.setSoftkeys(t('skBack'), t('skClose'), t('skMode'));
+  }
+
+  /* ---------- 关于页 ---------- */
+
+  function openAbout() {
+    UI.renderAbout(APP_VERSION);
+    UI.showView('about');
+    UI.setSoftkeys(t('skBack'), '', '');
+  }
+
+  function closeAbout() {
+    UI.showView('menu');
     UI.setSoftkeys(t('skBack'), t('skClose'), t('skMode'));
   }
 
@@ -731,6 +751,11 @@
 
   function onKey(e) {
     var k = e.key;
+    /* 关于页：返回/确定回参数菜单，其它键忽略 */
+    if (UI.aboutActive()) {
+      if (k === 'Backspace' || k === 'Enter' || k === 'SoftLeft') { e.preventDefault(); closeAbout(); }
+      return;
+    }
     if (k === 'Backspace') {
       e.preventDefault();
       if (UI.menuActive()) { closeMenu(); }
@@ -745,11 +770,19 @@
     }
     if (UI.menuActive()) {
       if (k === 'ArrowUp' || k === 'ArrowDown' || k === 'ArrowLeft' || k === 'ArrowRight') {
+        var it = UI.selectedItem();
+        if (k === 'ArrowRight' && it && it.open && !it.cycle) { it.open(); e.preventDefault(); return; }  /* 二级页：→ 进入 */
         UI.menuKey(k);
         e.preventDefault();
         return;
       }
-      if (k === 'Enter' || k === 'SoftLeft') { closeMenu(); return; }
+      if (k === 'Enter') {
+        var sel = UI.selectedItem();
+        if (sel && sel.open) { sel.open(); return; }   /* 二级页（关于） */
+        closeMenu();
+        return;
+      }
+      if (k === 'SoftLeft') { closeMenu(); return; }
       if (k === 'SoftRight') { switchMode(); return; }
       return;
     }

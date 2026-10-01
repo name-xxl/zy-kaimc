@@ -23,7 +23,7 @@ html, body {
 }
 #hud-bottom {
   position: absolute; bottom: 0; left: 0; right: 0;
-  display: flex; justify-content: space-between; align-items: flex-end;
+  display: flex; flex-wrap: wrap; justify-content: space-between; align-items: flex-end;
   padding: 3px; font-size: 12px;
 }
 #hud-top span, #hud-bottom span {
@@ -35,15 +35,16 @@ html, body {
   text-overflow: ellipsis;
   max-width: 60%;
 }
-/* 参数栏：占满左侧剩余宽度并允许折行（内容多时不再被省略号截断）；右侧版本/变焦保持一行。
- * keep-all：中文标签不拦腰断行，折行只发生在 " · " 分隔处 */
+/* 参数栏：占满剩余宽度并可折行（内容多才折，不再被省略号截断）；
+ * keep-all：中文标签不拦腰断行，折行只发生在 " · " 分隔处。
+ * 缩放/变焦条放不下时整条换到下一行右对齐（flex-wrap），不挤压参数栏 */
 #hud-bottom #hud-param {
   flex: 1 1 auto; max-width: none;
   white-space: normal; overflow: visible; text-overflow: clip;
   line-height: 1.45; text-align: left;
   word-break: keep-all; overflow-wrap: break-word;
 }
-#hud-bottom #hud-zoom { flex: 0 0 auto; margin-left: 4px; }
+#hud-bottom #hud-zoom { flex: 0 0 auto; margin-left: auto; }
 #hud-rec { color: #ff5252; font-weight: bold; }
 
 #debug {
@@ -110,3 +111,17 @@ html, body {
   box-sizing: border-box;
 }
 #sk-center { font-weight: bold; }
+
+/* 关于页（参数菜单最后一项进入）：版本号 / 项目地址 / 运行环境 */
+#about-view { background: #000; }
+#about-title {
+  padding: 8px;
+  font-size: 13px;
+  color: #9fd0ff;
+  border-bottom: 1px solid #222;
+}
+#about-body { padding: 10px 8px; font-size: 13px; line-height: 1.9; }
+#about-body .about-row { display: flex; justify-content: space-between; flex-wrap: wrap; }
+#about-body .about-row .k { color: #888; flex: 0 0 auto; white-space: nowrap; margin-right: 8px; }
+#about-body .about-row .v { flex: 1 1 auto; text-align: right; overflow-wrap: anywhere; }
+#about-body .about-row .v.url { color: #7fb2ff; font-size: 12px; }

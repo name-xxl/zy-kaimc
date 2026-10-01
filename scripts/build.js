@@ -168,11 +168,11 @@ function manifestVersion(relManifest) {
 }
 const appVer = manifestVersion('app/manifest.webapp');
 const probeVer = manifestVersion('tools/probe/manifest.webapp');
-/* 版本一致性：main.js 的 APP_VERSION（HUD 显示）应与 manifest 主版本一致，防交付版本错配 */
+/* 版本一致性：main.js 的 APP_VERSION（关于页显示）应与 manifest 主版本一致，防交付版本错配 */
 try {
   const m = /APP_VERSION\s*=\s*'v(\d+)/.exec(fs.readFileSync(path.join(rootDir, 'app/js/main.js'), 'utf8'));
   check(!!m && appVer.split('.')[0] === m[1],
-    '版本一致：HUD v' + (m && m[1]) + ' ↔ manifest ' + appVer);
+    '版本一致：APP_VERSION v' + (m && m[1]) + ' ↔ manifest ' + appVer);
 } catch (e) {
   check(false, '版本一致性检查异常: ' + e.message);
 }

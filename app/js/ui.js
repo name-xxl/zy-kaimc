@@ -21,6 +21,38 @@
   UI.showView = function (name) {
     U.show('finder-view', name === 'finder');
     U.show('menu-view', name === 'menu');
+    U.show('about-view', name === 'about');
+  };
+
+  UI.aboutActive = function () {
+    var el = U.byId('about-view');
+    return el && !el.classList.contains('hidden');
+  };
+
+  /* 关于页内容（版本号 / 项目地址 / 运行环境），由调用方给版本号 */
+  UI.renderAbout = function (ver) {
+    U.setText('about-title', root.Strings.t('aboutTitle'));
+    var body = U.byId('about-body');
+    if (!body) return;
+    body.textContent = '';
+    var rows = [
+      [root.Strings.t('aboutVer'), ver, ''],
+      [root.Strings.t('aboutRepo'), 'github.com/name-xxl/zy-kaimc', 'url'],
+      [root.Strings.t('aboutEnv'), 'KaiOS 2.5 · Nokia 2720', '']
+    ];
+    rows.forEach(function (r) {
+      var div = root.document.createElement('div');
+      div.className = 'about-row';
+      var k = root.document.createElement('span');
+      k.className = 'k';
+      k.textContent = r[0];
+      var v = root.document.createElement('span');
+      v.className = 'v' + (r[2] ? ' ' + r[2] : '');
+      v.textContent = r[1];
+      div.appendChild(k);
+      div.appendChild(v);
+      body.appendChild(div);
+    });
   };
 
   UI.hud = function (o) {
@@ -107,6 +139,11 @@
   };
 
   UI.refreshMenu = UI._renderMenu;
+
+  /* 当前选中的菜单项（用于 Enter 进入二级页，如"关于"） */
+  UI.selectedItem = function () {
+    return menuItems[menuIdx] || null;
+  };
 
   root.KaiUI = UI;
 })(typeof window !== 'undefined' ? window : globalThis);
