@@ -55,7 +55,13 @@ CRC  CRC16/XMODEM（init 0x0000，poly 0x1021），对 FMT..ARGS 计算，小端
 | `oncharacteristicchanged` / addEventListener | ❌ **永远不触发**（这就是 kaios.dev "KaiOS 不支持通知"的含义） |
 | `readValue()` 轮询 | ❌ 通知特征无 READ 属性，ATT 读被栈直接拒绝 |
 
-⇒ **接收实现 = 100ms 轮询 `notifyChar.value`（本地缓存读）+ 差分**，见 `app/js/main.js startPolling()`。
+⇒ **接收实现 = 100ms 轮询 `notifyChar.value`（本地缓存读）+ 差分**，见 `app/js/session.js`。
+
+> **为什么不用"实时"事件、轮询延迟多大**：这台固件的 Gecko **不把 GATT 通知派发给 JS**（事件永不触发，见上表），
+> 事件驱动**不可用**；`readValue()`（ATT 读）也走不通（129601 无 READ 属性）。轮询 `.value` 是唯一可行路径，
+> 且是**纯本地内存读取**——通知到达由蓝牙栈完成，轮询只拷贝最新值做差分，**不产生任何 BLE 流量**。
+> 端到端延迟 = 轮询间隔（`AppCfg.POLL_MS`，默认 100ms ⇒ 平均 ~50ms、最坏 100ms）+ BLE 链路粒度
+> （抓包实测连接间隔：空闲 30ms / App 请求快速时 7.5ms）。想要更跟手把 `POLL_MS` 调小即可（如 30–50ms）。
 
 ### 按键上报（核心）
 云台以 notify 主动推（dir 仍是 0x3C，flag=0x10）：
