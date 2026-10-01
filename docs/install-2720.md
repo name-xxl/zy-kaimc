@@ -66,6 +66,7 @@
 | 刚连上就「云台断线」反复重连（约 4s 一轮） | 旧版应用对**不可读**的通知特征做 100ms `readValue` 轮询，被栈拒绝（logcat `ReadValue: BT_ENSURE_TRUE_REJECT(mProperties & GATT_CHAR_PROP_BIT_READ) failed`）4 次即误判断线。已修（不可读则跳过 POLL、读错误不再直接断线）。若仍出现：按 `#` 看断线括号里的原因（链路断开/轮询失败）并发给开发者 |
 | 「设备没有 GATT 接口(has=…)」 | **已定论（2026-10-01 实机）**：本机 GATT 完全可用——FEE9 过滤扫描扫到的设备 `type=le`、`gatt` 非空，`connect()`/`discoverServices()` 成功，fee9 + 129600/129601 特征齐全。此前报错是应用侧 bug（把扫描包装对象 `{address,name,rssi,device}` 当成 BluetoothDevice 用，`has=address\|name` 就是这么来的），已修。现在若再见此错：确认扫描走 FEE9 过滤、云台未被 ZY Cami 占用、云台重启后重试；`paired=` 只是兜底结局（0/noGATT/noMatch），**不需要配对**——`adapter.pair()` 在本固件会挂起等 PIN，不要调用 |
 | 中文显示方框 | 固件无中文字形：把 `app/js/strings.js` 的 `LANG` 改为 `'en'` 重装 |
+| 重装后界面/文案还是旧版（新旧混着） | 系统会缓存应用资源：**装完把应用彻底退出再打开**（必要时重启手机）再判断；确认方法：参数菜单最底「关于」里显示的版本号应等于刚装的版本 |
 | 想看运行日志 | WebIDE console 可看到探针/主应用输出；主应用取景界面按 `#` 有屏幕调试面板（再按关闭） |
 
 ## 调试面板（主应用）

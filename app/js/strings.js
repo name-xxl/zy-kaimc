@@ -134,11 +134,11 @@
     'red-eye': '红眼消除', redeye: '红眼消除', torch: '常亮',
     infinity: '无穷远', macro: '微距', edof: '全焦',
     'continuous-picture': '连续对焦·照片', 'continuous-video': '连续对焦·视频', 'continuous-picture-video': '连续对焦',
-    high: '高', low: '低', cif: 'CIF', qcif: 'QCIF',
+    high: '高', low: '低', cif: 'CIF 352×288', qcif: 'QCIF 176×144',
     /* 2720 相机 HAL 实测取值（2026-10-02 从真机 capabilities 抄录）里不在上表的 */
     'cloudy-daylight': '阴天', manual: '手动', hjr: '高感光', asd: '自动场景',
     sports: '运动', flowers: '花卉', candlelight: '烛光', whiteboard: '白板', blackboard: '黑板',
-    fixed: '固定焦距', qvga: 'QVGA', '480p': '480p', ar: 'AR'
+    fixed: '固定焦距', qvga: 'QVGA 320×240', '480p': '标清 480p', ar: 'AR'
   };
 
   function val(v) {

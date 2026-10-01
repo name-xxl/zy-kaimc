@@ -3,7 +3,7 @@
   "short_name": "ZY-KaiCam",
   "description": "用智云云鹤 M2 的按键控制 KaiOS 相机（拍照/录像/参数）",
   "type": "privileged",
-  "version": "8.3",
+  "version": "8.4",
   "launch_path": "/index.html",
   "fullscreen": true,
   "icons": {
