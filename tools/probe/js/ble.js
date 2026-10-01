@@ -207,18 +207,21 @@
   };
 
   /* 检查并（必要时）手动打开通知 CCCD(0x2902)。
-   * KaiOS 的 startNotifications() 可能是空壳：CCCD 不写 0x0001，云台永远不会发通知 */
+   * KaiOS 的 startNotifications() 可能是空壳：CCCD 不写 0x0001，云台永远不会发通知。
+   * 无论成功失败都必须 resolve info（曾因写出错分支吞掉 info 导致上层拿到 undefined） */
   Bt.prototype.ensureNotifyCccd = function (con) {
     var ch = con.notifyChar;
-    var info = { props: null, desc: false, cccd: '', wrote: '' };
+    var info = { props: null, descs: -1, cccd: '', wrote: '', note: '' };
     try { info.props = ch.properties; } catch (e) { /* 无该属性 */ }
-    var d = null, ds = [];
-    try { ds = ch.descriptors || []; } catch (e) { ds = []; }
-    for (var i = 0; i < ds.length; i++) {
-      if (String(ds[i].uuid || '').toLowerCase().indexOf('2902') !== -1) { d = ds[i]; break; }
+    var d = null, ds = null;
+    try { ds = ch.descriptors; } catch (e) { ds = null; }
+    if (ds) {
+      info.descs = ds.length;
+      for (var i = 0; i < ds.length; i++) {
+        if (String(ds[i].uuid || '').toLowerCase().indexOf('2902') !== -1) { d = ds[i]; break; }
+      }
     }
     if (!d) { info.cccd = 'no-2902'; return Promise.resolve(info); }
-    info.desc = true;
     var readBack = function () {
       return U.prom(d.readValue(), 'cccd.readValue').then(function () {
         var v = new Uint8Array(d.value || []);
@@ -227,17 +230,23 @@
         info.cccd = 'read-err:' + ((e && (e.message || e.name)) || 'unknown');
       });
     };
+    var writeTry = function (val) {
+      return U.prom(d.writeValue(new Uint8Array([val, 0]).buffer), 'cccd.writeValue').then(
+        function () { return 'ok'; },
+        function (e) { return 'err:' + ((e && (e.message || e.name)) || 'unknown'); });
+    };
+    /* 0x10=通知→0x0001；只有 0x20=指示→0x0002；属性位缺失时先 1 后 2 */
+    var order = [1, 2];
+    if (typeof info.props === 'number' && (info.props & 0x20) && !(info.props & 0x10)) order = [2, 1];
     return readBack().then(function () {
-      if (info.cccd === '01' || info.cccd === '02') return info;
-      /* 有通知属性(0x10)写 0x0001；只有指示(0x20)写 0x0002 */
-      var enable = (typeof info.props === 'number' && (info.props & 0x20) && !(info.props & 0x10)) ? 2 : 1;
-      var buf = new Uint8Array([enable, 0x00]).buffer;
-      return U.prom(d.writeValue(buf), 'cccd.writeValue').then(function () {
-        info.wrote = '0x' + enable;
-        return readBack();
-      }, function (e) {
-        info.wrote = 'err:' + ((e && (e.message || e.name)) || 'unknown');
-      });
+      if (info.cccd === '01' || info.cccd === '02') { info.note = 'already-on'; return info; }
+      return writeTry(order[0]).then(function (r1) {
+        info.wrote = '0x' + order[0] + ' ' + r1;
+        if (r1 === 'ok') return null;
+        return writeTry(order[1]).then(function (r2) {
+          info.wrote += ' / 0x' + order[1] + ' ' + r2;
+        });
+      }).then(function () { return readBack(); }).then(function () { return info; });
     });
   };
 
@@ -256,6 +265,7 @@
         function (e) { return (e && (e.message || e.name)) || 'unknown'; });
     return started.then(function (startErr) {
       return self.ensureNotifyCccd(con).then(function (info) {
+        info = info || { props: null, descs: -1, cccd: '?', wrote: '', note: '' };
         if (startErr) info.startErr = startErr;
         return info;
       });

@@ -114,11 +114,13 @@
         S.client.feed(v);
         log('[IN/NOTIFY] ' + U.hex(new Uint8Array(v)));
       }).then(function (ni) {
+        ni = ni || {};
         log('notify: props=' + (typeof ni.props === 'number' ? '0x' + ni.props.toString(16) : '?') +
-          ' cccd=' + (ni.desc ? ni.cccd : 'no-2902') +
-          (ni.wrote ? ' 手动写=' + ni.wrote : '') +
+          ' descs=' + ni.descs + ' cccd=' + ni.cccd +
+          (ni.wrote ? ' 写=' + ni.wrote : '') +
+          (ni.note ? ' (' + ni.note + ')' : '') +
           (ni.startErr ? ' startErr=' + ni.startErr : ''));
-        log((ni.cccd === '01' || ni.cccd === '02' || ni.wrote)
+        log((ni.cccd === '01' || ni.cccd === '02')
           ? '通知已使能：按键时应出现 [IN/NOTIFY] 行（没有 → 实机不派发事件）'
           : '⚠ CCCD 未开启：云台不会发通知，按键不会有 [IN] 行');
       }).catch(function (e) {

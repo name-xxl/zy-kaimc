@@ -184,9 +184,11 @@
       });
       return bt.armNotifications(con, function (val) { state.client.feed(val); })
         .then(function (ni) {
+          ni = ni || {};
           var s = 'notify: props=' + (typeof ni.props === 'number' ? '0x' + ni.props.toString(16) : '?') +
-            ' cccd=' + (ni.desc ? ni.cccd : 'no-2902');
-          if (ni.wrote) s += ' 手动写=' + ni.wrote;
+            ' descs=' + ni.descs + ' cccd=' + ni.cccd;
+          if (ni.wrote) s += ' 写=' + ni.wrote;
+          if (ni.note) s += ' (' + ni.note + ')';
           if (ni.startErr) s += ' startErr=' + ni.startErr;
           dlog(s);
         })
