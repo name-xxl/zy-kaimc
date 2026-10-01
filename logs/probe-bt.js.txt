@@ -1,0 +1,34 @@
+window.__bt2 = 'start';
+try {
+  var mgr = navigator.mozBluetooth;
+  var a = mgr.defaultAdapter;
+  if (!a) {
+    window.__bt2 = 'adapter-null';
+  } else {
+    var st;
+    try { st = a.state; } catch (e1) { st = 'state-throw:' + e1.name; }
+    var en;
+    try { en = a.enabled; } catch (e4) { en = 'en-throw:' + e4.name; }
+    window.__bt2 = 'got state=' + st + ' enabled=' + en;
+    var p = a.enable();
+    if (p && 'onsuccess' in p) {
+      p.onsuccess = function () { window.__bt2 += ' enable-ok'; };
+      p.onerror = function () { window.__bt2 += ' enable-err'; };
+    } else { window.__bt2 += ' ret=' + typeof p; }
+    setTimeout(function () {
+      var s2;
+      try { s2 = a.state; } catch (e2) { s2 = 'throw:' + e2.name; }
+      var a2 = mgr.defaultAdapter;
+      var s3;
+      try { s3 = a2 ? a2.state : 'null'; } catch (e5) { s3 = 'throw:' + e5.name; }
+      var canScan = 'no';
+      try {
+        var h = a.startLeScan([]);
+        canScan = 'leScan-ok';
+        try { a.stopLeScan(h); } catch (e6) { }
+      } catch (e7) { canScan = 'leScan-throw:' + e7.name; }
+      window.__bt2 += ' post=' + s2 + ' fresh=' + s3 + ' scan=' + canScan;
+    }, 6000);
+  }
+} catch (e0) { window.__bt2 = 'throw ' + e0.name + ':' + e0.message; }
+'fired'

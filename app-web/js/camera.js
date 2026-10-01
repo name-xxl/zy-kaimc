@@ -132,7 +132,7 @@
       if (key === 'focus') return c.focusMode;
       if (key === 'ec') return c.exposureCompensation;
       if (key === 'zoom') return c.zoom;
-      if (key === 'pictureSize') return (typeof c.getPictureSize === 'function') ? c.getPictureSize() : c.pictureSize;
+      if (key === 'pictureSize') return c.pictureSize;
       if (key === 'recorderProfile') return c.recorderProfile;
     } catch (e) { /* 属性不存在 */ }
     return undefined;
@@ -150,51 +150,9 @@
       else if (key === 'focus') c.focusMode = value;
       else if (key === 'ec') c.exposureCompensation = value;
       else if (key === 'zoom') c.zoom = value;
-      else if (key === 'pictureSize') {
-        if (typeof c.setPictureSize === 'function') c.setPictureSize(value);
-        else c.pictureSize = value;
-      }
+      else if (key === 'pictureSize') c.pictureSize = value;
       else if (key === 'recorderProfile') c.recorderProfile = value;
     } catch (e) { /* 该机型不支持 */ }
-  };
-
-  /* 能力清单（参数菜单据此生成）。KaiOS 2720 实测：capabilities 为空对象，
-   * 但白平衡/变焦/曝光补偿属性本身可读写 → 为空时给保守候选值兜底，以回读值为准。 */
-  Cam.prototype.capabilities = function () {
-    var c = this.caps || {};
-    var nonEmpty = function (a) { return (a && a.length) ? a : []; };
-    var out = {
-      pictureSizes: nonEmpty(c.pictureSizes),
-      previewSizes: nonEmpty(c.previewSizes),
-      recorderProfiles: nonEmpty(c.recorderProfiles),
-      whiteBalanceModes: nonEmpty(c.whiteBalanceModes),
-      isoModes: nonEmpty(c.isoModes),
-      sceneModes: nonEmpty(c.sceneModes),
-      effects: nonEmpty(c.effects),
-      flashModes: nonEmpty(c.flashModes),
-      focusModes: nonEmpty(c.focusModes),
-      zoomRatios: nonEmpty(c.zoomRatios),
-      ecMin: (c.minExposureCompensation !== undefined) ? c.minExposureCompensation : 0,
-      ecMax: (c.maxExposureCompensation !== undefined) ? c.maxExposureCompensation : 0,
-      ecStep: (c.exposureCompensationStep !== undefined) ? c.exposureCompensationStep : 1
-    };
-    if (!out.whiteBalanceModes.length) {
-      out.whiteBalanceModes = ['auto', 'incandescent', 'daylight', 'fluorescent', 'cloudy'];
-    }
-    if (!out.isoModes.length) out.isoModes = ['auto'];
-    if (!out.flashModes.length) out.flashModes = ['auto', 'off', 'on'];
-    if (!out.sceneModes.length) out.sceneModes = ['auto'];
-    if (!out.effects.length) out.effects = ['none'];
-    if (!out.focusModes.length) out.focusModes = ['auto'];
-    if (!out.zoomRatios.length && this.control && typeof this.control.zoom === 'number') {
-      out.zoomRatios = [1, 2, 3, 4];
-    }
-    if (out.ecMax <= out.ecMin && this.control && typeof this.control.exposureCompensation === 'number') {
-      out.ecMin = -2;
-      out.ecMax = 2;
-      out.ecStep = 0.5;
-    }
-    return out;
   };
 
   /* 取景尺寸候选：capabilities 里最接近屏幕的几个；没有则给常见兜底 */
@@ -214,25 +172,6 @@
     var self = this;
     var c = this.control;
     if (!c) return Promise.reject(new Error('相机未打开'));
-
-    /* KaiOS 2720（实测）：CameraControl 没有 getPreviewStream，
-     * control 本身就是 MediaStream，直接喂给 video 即可（320x240 帧流已验证）。 */
-    if (typeof c.getPreviewStream !== 'function') {
-      return new Promise(function (resolve, reject) {
-        try {
-          if ('mozSrcObject' in videoEl) videoEl.mozSrcObject = c;
-          else videoEl.srcObject = c;
-          videoEl.play();
-        } catch (e) {
-          self.dbg('✗ 预览直连 ' + e.name + ':' + e.message);
-          reject(new Error('取景流启动失败'));
-          return;
-        }
-        self.previewStream = c;
-        self.dbg('✓ 预览直连(control=MediaStream)');
-        resolve(c);
-      });
-    }
 
     var variants = [];
     self._previewCandidates().forEach(function (s) {
@@ -290,8 +229,7 @@
   };
 
   Cam.prototype.stopPreview = function () {
-    /* KaiOS 直连模式下 previewStream 就是 control，绝不能 stop 它 */
-    if (this.previewStream && this.previewStream.stop && this.previewStream !== this.control) {
+    if (this.previewStream && this.previewStream.stop) {
       try { this.previewStream.stop(); } catch (e) { /* 已停止 */ }
     }
     this.previewStream = null;
@@ -311,34 +249,6 @@
     var self = this;
     var c = this.control;
     if (!c) return Promise.reject(new Error('相机未打开'));
-
-    /* KaiOS 2720（实测）：takePicture 无回调，结果经 onpicture(BlobEvent) 事件送达 */
-    if (typeof c.getPreviewStream !== 'function') {
-      return new Promise(function (resolve, reject) {
-        var done = false;
-        var finish = function (fn, arg) {
-          if (done) return;
-          done = true;
-          try { c.resumePreview(); } catch (e) { /* 部分机型自动恢复 */ }
-          fn(arg);
-        };
-        c.onpicture = function (ev) {
-          var blob = ev && ev.blob;
-          if (blob) finish(resolve, blob);
-          else finish(reject, new Error('onpicture 无 blob'));
-        };
-        try {
-          c.takePicture({ fileFormat: 'jpeg', dateTime: Date.now() });
-          self.dbg('拍照(fired)');
-        } catch (e) {
-          finish(reject, new Error('拍照失败: ' + e.message));
-          return;
-        }
-        root.setTimeout(function () { finish(reject, new Error('拍照超时')); }, 15000);
-      });
-    }
-
-    /* 标准 B2G 路径：回调式与 DOMRequest 式双重兼容 */
     var size = this._pickPictureSize();
     var variants = [{ fileFormat: 'jpeg', dateTime: Date.now() }];
     if (size) variants[0].pictureSize = size;
@@ -424,33 +334,10 @@
     }
   };
 
-  /* 切换拍照/录像。KaiOS：setConfiguration 直接切（不释放 control，规避 HAL 泄漏）；
-   * 标准平台：释放后按新模式重开。 */
+  /* 切换拍照/录像：释放后按新模式重开（跨 Gecko 48 各实现最稳的路径） */
   Cam.prototype.switchMode = function (mode, videoEl) {
     var self = this;
     this.mode = (mode === 'video') ? 'video' : 'picture';
-    var c = this.control;
-    if (c && typeof c.setConfiguration === 'function' && typeof c.getPreviewStream !== 'function') {
-      return new Promise(function (resolve, reject) {
-        var done = false;
-        var fin = function (ok, err) {
-          if (done) return;
-          done = true;
-          if (ok) resolve(self.startPreview(videoEl));
-          else reject(err || new Error('setConfiguration 失败'));
-        };
-        try {
-          var r = c.setConfiguration({ mode: self.mode });
-          if (r && 'onsuccess' in r) {
-            r.onsuccess = function () { fin(true); };
-            r.onerror = function () { fin(false, r.error); };
-          } else {
-            root.setTimeout(function () { fin(true); }, 800);
-          }
-        } catch (e) { fin(false, e); }
-        root.setTimeout(function () { fin(false, new Error('切换超时')); }, 6000);
-      });
-    }
     this.stopPreview();
     var old = this.control;
     this.control = null;

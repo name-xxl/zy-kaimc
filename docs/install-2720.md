@@ -37,6 +37,19 @@
 - 建议把系统设置的屏幕超时调长，避免取景中途熄屏。
 - 先装探针抓按键字节，确认协议后再装主应用（见 README 快速开始）。
 
+## 本机实测要点（2720 Flip，2026-10）
+
+- **蓝牙必须在系统设置里手动打开一次**（App 无法代开射频，`adapter.enable()` 被固件移除）。
+- **相机若一直"启动中"或挂起**：重启手机即可恢复——某个实例未释放相机时 HAL 会被占死。
+  本 App 已在退出/刷新时自动 `release()`，正常使用不会再出现。
+- **若屏幕弹出"允许使用相机"权限框，选允许**（camera 权限官方定义为 PROMPT 级）。
+- KaiOS 相机 API 与标准 B2G 不同（本 App 已适配，实测结论）：
+  取景 = CameraControl 自身即 MediaStream，直接喂给 video；
+  拍照 = `takePicture(config)` 后经 `onpicture(BlobEvent)` 事件取 blob；
+  参数 = 直接读写 `whiteBalanceMode/zoom/exposureCompensation` 属性；
+  模式切换 = `setConfiguration({mode})`。
+- 本机验证过的能力：取景 320×240 ✓、白平衡 ✓、数码变焦 2× ✓、曝光补偿 ✓、照片 1600×1200。
+
 ## 常见问题
 
 | 现象 | 处理 |

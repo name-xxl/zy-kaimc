@@ -37,13 +37,6 @@
   };
 
   root.addEventListener('load', boot);
-  /* KaiOS HAL 泄漏防护：退出/刷新前必须 release，否则相机将挂起直到重启 */
-  root.addEventListener('unload', releaseHal);
-  root.addEventListener('beforeunload', releaseHal);
-
-  function releaseHal() {
-    try { if (cam.control) cam.control.release(); } catch (e) { /* 已释放 */ }
-  }
 
   /* ---------- 调试面板（取景界面按 # 开关） ---------- */
 
