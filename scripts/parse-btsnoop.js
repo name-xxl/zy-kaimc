@@ -42,8 +42,28 @@ function attOpName(op) {
   return {
     0x1b: 'NOTIFY', 0x1d: 'INDICATE', 0x52: 'WRITE_CMD', 0x12: 'WRITE_REQ',
     0x08: 'READ_RSP', 0x0a: 'READ_REQ', 0x0b: 'READ_BLOB_REQ', 0x0c: 'READ_BLOB_RSP',
-    0x16: 'PREP_WRITE_REQ', 0x18: 'EXEC_WRITE_REQ', 0x01: 'ERROR_RSP'
+    0x16: 'PREP_WRITE_REQ', 0x18: 'EXEC_WRITE_REQ', 0x01: 'ERROR_RSP',
+    0x03: 'EXCH_MTU_REQ', 0x02: 'EXCH_MTU_RSP'
   }[op] || ('0x' + op.toString(16));
+}
+
+/* SMP（配对/绑定）——判断官方 App 是否与云台绑定/加密 */
+function smpOpName(op) {
+  return {
+    0x01: 'PairingRequest', 0x02: 'PairingResponse', 0x03: 'PairingConfirm',
+    0x04: 'PairingRandom', 0x05: 'PairingFailed', 0x06: 'EncryptionInformation',
+    0x07: 'MasterIdentification', 0x08: 'IdentityInformation', 0x09: 'IdentityAddressInformation',
+    0x0a: 'SigningInformation', 0x0b: 'SecurityRequest', 0x0c: 'PairingPublicKey',
+    0x0d: 'PairingDHKeyCheck', 0x0e: 'PairingKeypress'
+  }[op] || ('smp0x' + op.toString(16));
+}
+
+/* HCI 命令里与加密/绑定相关的（type=0x01） */
+function hciCmdName(op) {
+  return {
+    0x2019: 'LE_Start_Encryption', 0x201a: 'LE_LTK_Request_Reply', 0x200b: 'LE_Enable_Encryption',
+    0x0405: 'Create_Connection', 0x2016: 'LE_Read_Remote_Features'
+  }[op] || null;
 }
 
 const parsers = {};   /* 每句柄一个协议 Parser（分帧用） */
@@ -63,6 +83,12 @@ while (off + 24 <= buf.length) {
   let payload;
   if (datalink === 1002) {
     if (data.length < 1) continue;
+    if (data[0] === 0x01) {              /* HCI 命令：只挑加密/连接相关打印 */
+      const op = data.length >= 3 ? (data[1] | (data[2] << 8)) : 0;
+      const name = hciCmdName(op);
+      if (name) console.log(tsStr(sec, usec) + ' -> HCI_CMD ' + name + ' ' + hex(data.slice(3, 20)));
+      continue;
+    }
     if (data[0] !== 0x02) continue;      /* 只看 ACL */
     payload = data.slice(1);
   } else if (datalink === 1001) {
@@ -74,8 +100,20 @@ while (off + 24 <= buf.length) {
   if (payload.length < 8) continue;
   const l2len = payload.readUInt16LE(4);
   const cid = payload.readUInt16LE(6);
-  if (cid !== 0x0004) continue;           /* 只看 ATT */
   const l2 = payload.slice(8, 8 + l2len);
+
+  if (cid === 0x0006) {                   /* SMP：配对/绑定 */
+    const st = stats.SMP = (stats.SMP || 0) + 1;
+    const dirS = (flags & 1) ? '<-' : '->';
+    console.log(tsStr(sec, usec) + ' ' + dirS + ' SMP ' + (l2.length ? smpOpName(l2[0]) : '?') +
+      ' ' + hex(l2.slice(0, 12)));
+    continue;
+  }
+  if (cid !== 0x0004) {                   /* 非 ATT 通道计入统计 */
+    const key = 'cid0x' + cid.toString(16);
+    stats[key] = (stats[key] || 0) + 1;
+    continue;
+  }
   if (l2.length < 3) continue;
 
   const op = l2[0];
