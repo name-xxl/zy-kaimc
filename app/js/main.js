@@ -19,7 +19,7 @@
   var Dbg = root.KaiDbg;
   var Menu = root.KaiMenu;
 
-  var APP_VERSION = 'v9.0';
+  var APP_VERSION = 'v9.1';
   var GIMBAL_NAME_RE = /CRANE[-_ ]?M2/i;
 
   /* 云台链路状态 */

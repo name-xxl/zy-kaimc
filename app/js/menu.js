@@ -17,16 +17,16 @@
     var caps = ctx.caps;
     var items = [];
 
-    /* HAL 参数：←→ 改值 */
-    function addCycle(labelKey, values, paramKey, fmt) {
+    /* HAL 参数：←→ 改值；get 可选，用于"当前值取不到时回落到有效值"（如拍照模式下的录像规格） */
+    function addCycle(labelKey, values, paramKey, fmt, get) {
       if (!values || !values.length) return;
       fmt = fmt || textOf;
+      var cur = function () { return get ? get() : cam.getParam(paramKey); };
       var item = {
         label: t(labelKey),
-        valueText: fmt(cam.getParam(paramKey)),
+        valueText: fmt(cur()),
         cycle: function (d) {
-          var cur = cam.getParam(paramKey);
-          var idx = values.indexOf(cur);
+          var idx = values.indexOf(cur());
           idx = (idx === -1) ? 0 : (idx + d + values.length) % values.length;
           cam.setParam(paramKey, values[idx]);
           item.valueText = fmt(values[idx]);
@@ -103,6 +103,13 @@
       return tval(v) + (sz ? ' ' + sz : '');
     }
 
+    /* 拍照模式下 HAL 不给 recorderProfile（实测 undefined）→ 显示与切换基准都回落到列表首项
+     * （去重排序后的「默认 720×480」），与录像时的实际回落一致（camera.js 取不到就用 default） */
+    function profGet() {
+      var v = cam.getParam('recorderProfile');
+      return (v && profValues.indexOf(v) >= 0) ? v : profValues[0];
+    }
+
     addCycle('pWhiteBalance', caps.whiteBalanceModes, 'whiteBalance');
     addCycle('pIso', caps.isoModes, 'iso');
     /* 场景项：这里的 auto 表示"场景功能关闭"（与白平衡/ISO 的"自动"不是一回事），显示为「关」
@@ -116,7 +123,7 @@
     addCycle('pEffect', caps.effects, 'effect');
     addCycle('pFlash', caps.flashModes, 'flash');
     addCycle('pFocus', caps.focusModes, 'focus');
-    addCycle('pProfile', profValues, 'recorderProfile', profText);
+    addCycle('pProfile', profValues, 'recorderProfile', profText, profGet);
 
     if (caps.pictureSizes.length) {
       var sizes = caps.pictureSizes;
