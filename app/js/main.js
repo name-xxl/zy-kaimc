@@ -15,7 +15,7 @@
   /* 本文件只做编排：相机 + UI/键位 + 云台会话(KaiSession) + 按键分发(KaiButtons)。
    * 键码与时序常量见 config.js（AppCfg.KEY / AppCfg.*_MS） */
 
-  var APP_VERSION = 'v7.6';
+  var APP_VERSION = 'v7.7';
   var GIMBAL_NAME_RE = /CRANE[-_ ]?M2/i;
 
   var state = {
@@ -40,6 +40,7 @@
     ecList: [],
     ecNow: 0,
     debugOn: false,
+    debugScroll: 0,
     appLog: []
   };
 
@@ -81,13 +82,26 @@
     renderDebug();
   }
 
+  /* 调试面板：只显示最近 DEBUG_PAGE 条，**最新的在最上面**（240×320 装不下 10 行，
+   * 之前最新的日志被 max-height 裁掉）；面板打开时 ↑ 往旧翻、↓ 往回翻 */
+  var DEBUG_PAGE = 7;
+
+  function debugMaxScroll(total) {
+    return Math.max(0, Math.ceil(total / DEBUG_PAGE) - 1);
+  }
+
   function renderDebug() {
     var el = U.byId('debug');
     if (!el) return;
     if (!state.debugOn) { el.textContent = ''; U.show('debug', false); return; }
     U.show('debug', true);
     var lines = cam.getLog().concat(state.appLog);
-    el.textContent = lines.slice(-10).join('\n');
+    var off = Math.min(state.debugScroll || 0, debugMaxScroll(lines.length));
+    state.debugScroll = off;
+    var end = Math.max(0, lines.length - off * DEBUG_PAGE);
+    var start = Math.max(0, end - DEBUG_PAGE);
+    var head = '# 日志' + (off ? ' -' + off + '页' : '') + '（↑旧 ↓新 #关）';
+    el.textContent = head + '\n' + lines.slice(start, end).reverse().join('\n');
   }
 
   function fmtClock() {
@@ -678,6 +692,7 @@
     }
     if (k === '#') {
       state.debugOn = !state.debugOn;
+      state.debugScroll = 0;
       renderDebug();
       return;
     }
@@ -689,6 +704,16 @@
       }
       if (k === 'Enter' || k === 'SoftLeft') { closeMenu(); return; }
       if (k === 'SoftRight') { switchMode(); return; }
+      return;
+    }
+    /* 面板打开时 ↑↓ 翻日志历史（不切变焦），否则还是变焦 */
+    if (state.debugOn && (k === 'ArrowUp' || k === 'ArrowDown')) {
+      var lines = cam.getLog().concat(state.appLog);
+      var max = debugMaxScroll(lines.length);
+      var next = state.debugScroll + (k === 'ArrowUp' ? 1 : -1);
+      state.debugScroll = Math.max(0, Math.min(max, next));
+      renderDebug();
+      e.preventDefault();
       return;
     }
     switch (k) {

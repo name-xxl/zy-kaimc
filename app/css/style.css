@@ -48,7 +48,7 @@ html, body {
 
 #debug {
   position: absolute; top: 24px; left: 0; right: 0;
-  max-height: 40%;
+  max-height: 70%;
   overflow: hidden;
   background: rgba(0, 0, 0, 0.55);
   color: #7fe37f;
