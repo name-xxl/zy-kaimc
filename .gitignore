@@ -3,3 +3,4 @@ dist/
 .zcode/
 logs/
 app-web/
+node_modules/

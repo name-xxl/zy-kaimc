@@ -55,6 +55,17 @@
     } catch (e) { /* 不支持就维持普通布局 */ }
   }
 
+  /* 锁定竖屏方向：Gecko 录像管线按窗口方向角决定写入视频的旋转，
+   * 不锁的话录出来的视频是横的（实测）。 */
+  function lockPortrait() {
+    try {
+      if (root.screen && root.screen.orientation && root.screen.orientation.lock) {
+        var p = root.screen.orientation.lock('portrait');
+        if (p && typeof p.catch === 'function') p.catch(function () { /* 失败不影响拍摄 */ });
+      }
+    } catch (e) { /* 不支持就跳过 */ }
+  }
+
   /* ---------- 调试面板（取景界面按 # 开关） ---------- */
 
   function dlog(msg) {
@@ -84,6 +95,7 @@
   function boot() {
     UI.init();
     goFullscreen();
+    lockPortrait();
     setFinderKeys();
     UI.hud({ ble: t('camInit'), mode: t('modePhoto') });
     root.addEventListener('keydown', onKey);
@@ -280,6 +292,7 @@
   /* ---------- 快门 ---------- */
 
   function shutter() {
+    lockPortrait();
     if (state.mode === 'picture') takePhoto();
     else toggleRecord();
   }
@@ -578,6 +591,7 @@
       cam.stopPreview();
     } else {
       goFullscreen();
+      lockPortrait();
       if (cam.control) {
         cam.startPreview(U.byId('preview')).catch(function () {});
       }
