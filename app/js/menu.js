@@ -105,10 +105,10 @@
 
     addCycle('pWhiteBalance', caps.whiteBalanceModes, 'whiteBalance');
     addCycle('pIso', caps.isoModes, 'iso');
-    /* 场景项：这里的 auto 表示"场景功能关闭"（与白平衡/ISO 的"自动"不是一回事），
-     * asd 是 HAL 的自动场景识别，显示为「智能」 */
+    /* 场景项：这里的 auto 表示"场景功能关闭"（与白平衡/ISO 的"自动"不是一回事），显示为「关」
+     * （与自拍定时/连拍/间隔定时用同一个 kOff 文案）；asd 是 HAL 的自动场景识别，显示为「智能」 */
     function sceneText(v) {
-      if (v === 'auto') return tval('off');
+      if (v === 'auto') return t('kOff');
       if (v === 'asd') return t('sceneSmart');
       return textOf(v);
     }
