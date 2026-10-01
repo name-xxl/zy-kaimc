@@ -4,6 +4,7 @@
 
   var U = root.KaiUtil;
   var t = root.Strings.t;
+  var tval = root.Strings.val;   /* 相机 HAL 取值汉化（auto→自动 等） */
   var UI = root.KaiUI;
   var bt = root.KaiBt;
   var cam = root.KaiCam;
@@ -14,7 +15,7 @@
   /* 本文件只做编排：相机 + UI/键位 + 云台会话(KaiSession) + 按键分发(KaiButtons)。
    * 键码与时序常量见 config.js（AppCfg.KEY / AppCfg.*_MS） */
 
-  var APP_VERSION = 'v7.1';
+  var APP_VERSION = 'v7.2';
   var GIMBAL_NAME_RE = /CRANE[-_ ]?M2/i;
 
   var state = {
@@ -514,11 +515,11 @@
     var parts = [];
     if (caps.whiteBalanceModes.length) {
       var wb = cam.getParam('whiteBalance');
-      if (wb !== undefined && wb !== null) parts.push('WB:' + wb);
+      if (wb !== undefined && wb !== null) parts.push('WB:' + tval(wb));
     }
     if (caps.isoModes.length) {
       var iso = cam.getParam('iso');
-      if (iso !== undefined && iso !== null) parts.push('ISO:' + iso);
+      if (iso !== undefined && iso !== null) parts.push('ISO:' + tval(iso));
     }
     if (state.ecList.length) {
       parts.push('EC:' + (state.ecNow > 0 ? '+' : '') + state.ecNow);
@@ -557,7 +558,7 @@
     function textOf(v) {
       if (v === undefined || v === null || v === '') return '-';
       if (v.width) return v.width + '×' + v.height;
-      return String(v);
+      return tval(v);
     }
 
     addCycle('pWhiteBalance', caps.whiteBalanceModes, 'whiteBalance');

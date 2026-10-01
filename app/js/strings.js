@@ -87,9 +87,33 @@
     }
   };
 
+  /* 相机 HAL 取值汉化（菜单/HUD 用；英文模式或查不到就原样返回） */
+  var VALUES = {
+    auto: '自动', off: '关闭', on: '开启', none: '无', default: '默认', yes: '是', no: '否',
+    incandescent: '白炽灯', fluorescent: '荧光灯', 'warm-fluorescent': '暖色荧光', warmfluorescent: '暖色荧光',
+    daylight: '日光', cloudy: '阴天', twilight: '黄昏', shade: '阴影', tungsten: '钨丝灯',
+    night: '夜景', 'night-portrait': '夜景人像', portrait: '人像', landscape: '风景', snow: '雪景',
+    beach: '沙滩', sunset: '日落', sport: '运动', candle: '烛光', fireworks: '烟花', backlight: '逆光',
+    party: '聚会', theatre: '剧场', action: '动作', 'steady-photo': '稳定拍摄', steadyphoto: '稳定拍摄',
+    mono: '黑白', sepia: '棕褐', negative: '负片', posterize: '色调分离', solarize: '过度曝光',
+    emboss: '浮雕', aqua: '水蓝', sketch: '素描', neon: '霓虹',
+    'red-eye': '红眼消除', redeye: '红眼消除', torch: '常亮',
+    infinity: '无穷远', macro: '微距', edof: '全焦',
+    'continuous-picture': '连续对焦·照片', 'continuous-video': '连续对焦·视频', 'continuous-picture-video': '连续对焦',
+    high: '高', low: '低', cif: 'CIF', qcif: 'QCIF'
+  };
+
+  function val(v) {
+    if (v === undefined || v === null || v === '') return '-';
+    var s = String(v);
+    if (LANG !== 'zh') return s;
+    var key = s.toLowerCase().replace(/[\s_]+/g, '-');
+    return VALUES[key] || VALUES[s.toLowerCase()] || s;
+  }
+
   function t(key) {
     return (DICTS[LANG] && DICTS[LANG][key]) || DICTS.en[key] || key;
   }
 
-  root.Strings = { t: t, LANG: LANG };
+  root.Strings = { t: t, val: val, LANG: LANG };
 })(typeof window !== 'undefined' ? window : globalThis);

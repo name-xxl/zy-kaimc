@@ -472,7 +472,7 @@
             var p = c.startRecording({ rotation: 0, maxFileSizeBytes: 536870912, createPoster: false },
               storage, filename);
             self.recording = true;
-            self.dbg('✓ 录像开始 ' + filename + ' (' + profile + ')');
+            self.dbg('✓ 录像开始 ' + filename + ' (' + root.Strings.val(profile) + ')');
             if (p && typeof p.then === 'function') {
               p.then(function () { /* 停止后落定 */ }, function (err) {
                 self.recording = false;
