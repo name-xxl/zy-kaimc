@@ -163,15 +163,24 @@
   Cam.prototype.capabilities = function () {
     var c = this.caps || {};
     var nonEmpty = function (a) { return (a && a.length) ? a : []; };
-    /* KaiOS 的 recorderProfiles 是对象（键=profile 名），统一转数组 */
+    /* KaiOS 的 recorderProfiles 是对象（键=profile 名），统一转数组；
+     * 顺带把每个档位的实际分辨率读出来（真机 HAL 给了 video.width/height），菜单里可直接标注 */
     var recProfiles = c.recorderProfiles;
+    var recSizes = {};
     if (recProfiles && !recProfiles.length && typeof recProfiles === 'object') {
+      Object.keys(recProfiles).forEach(function (k) {
+        try {
+          var v = recProfiles[k] && recProfiles[k].video;
+          if (v && v.width && v.height) recSizes[k] = v.width + '×' + v.height;
+        } catch (e) { /* 取不到就不标 */ }
+      });
       recProfiles = Object.keys(recProfiles);
     }
     var out = {
       pictureSizes: nonEmpty(c.pictureSizes),
       previewSizes: nonEmpty(c.previewSizes),
       recorderProfiles: nonEmpty(recProfiles),
+      recorderProfileSizes: recSizes,
       whiteBalanceModes: nonEmpty(c.whiteBalanceModes),
       isoModes: nonEmpty(c.isoModes),
       sceneModes: nonEmpty(c.sceneModes),

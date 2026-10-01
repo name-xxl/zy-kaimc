@@ -15,7 +15,7 @@
   /* 本文件只做编排：相机 + UI/键位 + 云台会话(KaiSession) + 按键分发(KaiButtons)。
    * 键码与时序常量见 config.js（AppCfg.KEY / AppCfg.*_MS） */
 
-  var APP_VERSION = 'v8.4';
+  var APP_VERSION = 'v8.5';
   var GIMBAL_NAME_RE = /CRANE[-_ ]?M2/i;
 
   var state = {
@@ -701,17 +701,18 @@
     var caps = cam.capabilities();
     var items = [];
 
-    function addCycle(labelKey, values, paramKey) {
+    function addCycle(labelKey, values, paramKey, fmt) {
       if (!values || !values.length) return;
+      fmt = fmt || textOf;
       var item = {
         label: t(labelKey),
-        valueText: textOf(cam.getParam(paramKey)),
+        valueText: fmt(cam.getParam(paramKey)),
         cycle: function (d) {
           var cur = cam.getParam(paramKey);
           var idx = values.indexOf(cur);
           idx = (idx === -1) ? 0 : (idx + d + values.length) % values.length;
           cam.setParam(paramKey, values[idx]);
-          item.valueText = textOf(values[idx]);
+          item.valueText = fmt(values[idx]);
           UI.refreshMenu();
         }
       };
@@ -724,13 +725,32 @@
       return tval(v);
     }
 
+    /* 录像规格：档位名 + HAL 实际分辨率（如「默认 720×480」），并按分辨率从大到小排序，
+     * 让 ←→ 顺着画质走而不是照 HAL 的原始顺序（真机上高/默认/480p 都是 720×480） */
+    function profileValues() {
+      var list = (caps.recorderProfiles || []).slice();
+      var sz = caps.recorderProfileSizes || {};
+      var px = function (n) {
+        var m = /^(\d+)×(\d+)$/.exec(sz[n] || '');
+        return m ? (+m[1]) * (+m[2]) : 0;
+      };
+      list.sort(function (a, b) { return px(b) - px(a) || (a < b ? -1 : (a > b ? 1 : 0)); });
+      return list;
+    }
+
+    function profText(v) {
+      if (v === undefined || v === null || v === '') return '-';
+      var sz = (caps.recorderProfileSizes || {})[v];
+      return tval(v) + (sz ? ' ' + sz : '');
+    }
+
     addCycle('pWhiteBalance', caps.whiteBalanceModes, 'whiteBalance');
     addCycle('pIso', caps.isoModes, 'iso');
     addCycle('pScene', caps.sceneModes, 'scene');
     addCycle('pEffect', caps.effects, 'effect');
     addCycle('pFlash', caps.flashModes, 'flash');
     addCycle('pFocus', caps.focusModes, 'focus');
-    addCycle('pProfile', caps.recorderProfiles, 'recorderProfile');
+    addCycle('pProfile', profileValues(), 'recorderProfile', profText);
     if (caps.pictureSizes.length) {
       var sizes = caps.pictureSizes;
       var item = {
