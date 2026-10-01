@@ -15,7 +15,7 @@
   /* 本文件只做编排：相机 + UI/键位 + 云台会话(KaiSession) + 按键分发(KaiButtons)。
    * 键码与时序常量见 config.js（AppCfg.KEY / AppCfg.*_MS） */
 
-  var APP_VERSION = 'v7.7';
+  var APP_VERSION = 'v7.8';
   var GIMBAL_NAME_RE = /CRANE[-_ ]?M2/i;
 
   var state = {
@@ -578,8 +578,10 @@
   function renderHudBle() {
     var txt = state.bleText || '';
     if (state.gimbalConnected && state.gimbalBatt !== null) txt += ' ' + state.gimbalBatt + '%';
-    var m = (state.gimbalConnected && state.gimbalMode !== null) ? modeName(state.gimbalMode) : null;
-    if (m) txt += ' ' + m;
+    if (state.gimbalConnected && state.gimbalMode !== null) {
+      var m = modeName(state.gimbalMode);
+      txt += ' ' + (m || ('0x' + state.gimbalMode.toString(16)));   /* 未登记的码直接显示原值 */
+    }
     UI.hud({ ble: txt });
   }
 
