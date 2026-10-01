@@ -460,8 +460,8 @@
       if (!profiles.length) profiles = ['low', 'default', 'high'];
       var profile = (profiles.indexOf('high') !== -1) ? 'high' : profiles[profiles.length - 1];
       return new Promise(function (resolve, reject) {
-        /* 方向锁定 → 真等待锁完成 → setConfiguration 真等待（onerror 打日志）→
-         * 300ms 定长传导 → 开录。任何一步静默失败都会让旋转/档位错乱。 */
+        /* 方向锁（UI 保险，与矩阵无关）→ setConfiguration 真等待（onerror 打日志）→
+         * 300ms 定长传导 → 开录。setConfiguration 静默失败会让档位错乱。 */
         Promise.resolve(U.lockPortrait()).then(function () {
           return setConfigAsync(c, { mode: 'video', recorderProfile: profile }, self);
         }).then(function () {

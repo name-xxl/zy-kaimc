@@ -14,7 +14,7 @@
     0x20: 'shutter'
   };
 
-  var APP_VERSION = 'v5';
+  var APP_VERSION = 'v6';
   var GIMBAL_NAME_RE = /CRANE[-_ ]?M2/i;
 
   var state = {

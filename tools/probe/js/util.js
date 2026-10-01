@@ -49,8 +49,8 @@
   };
 
   /* 锁定竖屏方向并等待锁定完成（最长 800ms 兜底）。返回 Promise。
-   * Gecko 录像管线按窗口方向角决定写入视频的 tkhd 旋转
-   * （矩阵 = (传入 rotation + sensorAngle) % 360），不锁方向录像会横。 */
+   * 仅为竖屏 UI 方向稳定保险——录像 tkhd 矩阵 = (传入 rotation + sensorAngle) % 360，
+   * 与本锁无关（VID_rot0 未锁仍得正确 270° 矩阵）。 */
   U.lockPortrait = function () {
     return new Promise(function (resolve) {
       try {

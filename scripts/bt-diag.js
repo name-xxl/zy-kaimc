@@ -21,6 +21,7 @@ const waiters = [];
 
 function send(obj) {
   const json = JSON.stringify(obj);
+  if (process.env.RDD_DEBUG) console.error('SEND ' + json.slice(0, 200));
   sock.write(json.length + ':' + json);
 }
 
@@ -62,6 +63,7 @@ function feed() {
     buf = buf.slice(colon + 1 + len);
     let o;
     try { o = JSON.parse(payload); } catch (e) { continue; }
+    if (process.env.RDD_DEBUG) console.error('RECV ' + payload.slice(0, 200));
     if (o.from === 'root' && o.webappsActor && !actors) {
       actors = o;
       console.log('调试通道就绪');
